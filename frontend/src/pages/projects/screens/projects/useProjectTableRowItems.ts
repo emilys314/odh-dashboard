@@ -23,15 +23,30 @@ const useProjectTableRowItems = (
     ...accessReviewResource,
     namespace: project.metadata.name,
   });
+  const [allowUpdate] = useAccessReview({
+    ...accessReviewResource,
+    verb: 'update',
+    namespace: project.metadata.name,
+  });
+  const [allowDelete] = useAccessReview({
+    ...accessReviewResource,
+    verb: 'delete',
+    namespace: project.metadata.name,
+  });
+
   const navigate = useNavigate();
   const item: KebabItem[] = [
-    {
-      title: 'Edit project',
-      isDisabled: isRefreshing,
-      onClick: () => {
-        setEditData(project);
-      },
-    },
+    ...(allowUpdate
+      ? [
+          {
+            title: 'Edit project',
+            isDisabled: isRefreshing,
+            onClick: () => {
+              setEditData(project);
+            },
+          },
+        ]
+      : []),
     ...(allowCreate
       ? [
           {
@@ -42,15 +57,19 @@ const useProjectTableRowItems = (
           },
         ]
       : []),
-    {
-      isSeparator: true,
-    },
-    {
-      title: 'Delete project',
-      onClick: () => {
-        setDeleteData(project);
-      },
-    },
+    ...(allowDelete
+      ? [
+          {
+            isSeparator: true,
+          },
+          {
+            title: 'Delete project',
+            onClick: () => {
+              setDeleteData(project);
+            },
+          },
+        ]
+      : []),
   ];
   return item;
 };

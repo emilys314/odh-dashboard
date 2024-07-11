@@ -128,6 +128,9 @@ const ProjectTableRow: React.FC<ProjectTableRowProps> = ({
               {index === 0 ? (
                 <Td
                   className="odh-project-table__action-column"
+                  style={{
+                    ...(!(item?.length > 0) ? { visibility: 'hidden' } : {}),
+                  }}
                   isActionCell
                   rowSpan={notebookStates.length || 1}
                 >
