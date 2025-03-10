@@ -39,7 +39,7 @@ export const ManageConnectionModal: React.FC<Props> = ({
   onSubmit,
   isEdit = false,
 }) => {
-  const [error, setError] = React.useState<Error>();
+  const [submitError, setSubmitError] = React.useState<Error>();
   const [isSaving, setIsSaving] = React.useState(false);
   const [isModified, setIsModified] = React.useState(false);
 
@@ -80,7 +80,7 @@ export const ManageConnectionModal: React.FC<Props> = ({
     return {};
   });
 
-  const [validations, setValidations] = React.useState<{
+  const [connectionErrors, setConnectionErrors] = React.useState<{
     [key: string]: boolean;
   }>({});
   const isFormValid = React.useMemo(
@@ -94,8 +94,8 @@ export const ManageConnectionModal: React.FC<Props> = ({
           !connectionValues[field.envVar] &&
           field.type !== ConnectionTypeFieldType.Boolean,
       ) &&
-      !Object.values(validations).includes(false),
-    [connectionTypeName, selectedConnectionType, nameDescData, connectionValues, validations],
+      !Object.values(connectionErrors).find((e) => !!e),
+    [connectionTypeName, selectedConnectionType, nameDescData, connectionValues, connectionErrors],
   );
 
   // if user changes connection types, don't discard previous entries in case of accident
@@ -111,7 +111,7 @@ export const ManageConnectionModal: React.FC<Props> = ({
         previousValues.current[selectedConnectionType.metadata.name] = connectionValues;
         // clear previous values
         setConnectionValues({});
-        setValidations({});
+        setConnectionErrors({});
       }
       // load saved values?
       if (type?.metadata.name && type.metadata.name in previousValues.current) {
@@ -140,11 +140,11 @@ export const ManageConnectionModal: React.FC<Props> = ({
           onCancel={onClose}
           onSubmit={() => {
             setIsSaving(true);
-            setError(undefined);
+            setSubmitError(undefined);
 
             // this shouldn't ever happen, but type safety
             if (!connectionTypeName) {
-              setError(new Error('No connection type selected'));
+              setSubmitError(new Error('No connection type selected'));
               setIsSaving(false);
               return;
             }
@@ -161,11 +161,11 @@ export const ManageConnectionModal: React.FC<Props> = ({
                 onClose(true);
               })
               .catch((e) => {
-                setError(e);
+                setSubmitError(e);
                 setIsSaving(false);
               });
           }}
-          error={error}
+          error={submitError}
           isSubmitDisabled={!isFormValid || !isModified || isSaving}
           isSubmitLoading={isSaving}
           alertTitle=""
@@ -208,8 +208,8 @@ export const ManageConnectionModal: React.FC<Props> = ({
             }
             setConnectionValues((prev) => ({ ...prev, [field.envVar]: value }));
           }}
-          onValidate={(field, isValid) =>
-            setValidations((prev) => ({ ...prev, [field.envVar]: isValid }))
+          onValidate={(field, error) =>
+            setConnectionErrors((prev) => ({ ...prev, [field.envVar]: !!error }))
           }
         />
       </Form>
