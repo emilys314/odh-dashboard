@@ -16,6 +16,8 @@ import { useAccessReview } from '~/api';
 import { getDescriptionFromK8sResource, getDisplayNameFromK8sResource } from '~/concepts/k8s/utils';
 import ResourceNameTooltip from '~/components/ResourceNameTooltip';
 import HeaderIcon from '~/concepts/design/HeaderIcon';
+import { useResolvedExtensions } from '~/plugins/useResolvedExtensions';
+import { isProjectDetailsTab } from '~/plugins/extension-points';
 import useCheckLogoutParams from './useCheckLogoutParams';
 import ProjectOverview from './overview/ProjectOverview';
 import NotebookList from './notebooks/NotebookList';
@@ -49,6 +51,12 @@ const ProjectDetails: React.FC = () => {
   const workbenchEnabled = useIsAreaAvailable(SupportedArea.WORKBENCHES).status;
 
   useCheckLogoutParams();
+
+  const [projectDetailsTabExtensions] = useResolvedExtensions(isProjectDetailsTab);
+  // TODO: render all details tab extensions instead of just modelServing
+  const ModelsProjectDetailsTab = projectDetailsTabExtensions.find(
+    (tab) => tab.properties.id === ProjectSectionID.MODEL_SERVER,
+  )?.properties.component.default;
 
   return (
     <ApplicationsPage
@@ -111,7 +119,11 @@ const ProjectDetails: React.FC = () => {
                   {
                     id: ProjectSectionID.MODEL_SERVER,
                     title: 'Models',
-                    component: <ModelServingPlatform />,
+                    component: ModelsProjectDetailsTab ? (
+                      <ModelsProjectDetailsTab />
+                    ) : (
+                      <ModelServingPlatform />
+                    ),
                   },
                 ]
               : []),
@@ -151,6 +163,7 @@ const ProjectDetails: React.FC = () => {
             pipelinesEnabled,
             projectSharingEnabled,
             workbenchEnabled,
+            ModelsProjectDetailsTab,
           ],
         )}
       />

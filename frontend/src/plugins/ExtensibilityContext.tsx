@@ -6,9 +6,12 @@ import { useDeepCompareMemoize } from '~/utilities/useDeepCompareMemoize';
 import { SupportedArea } from '~/concepts/areas';
 import { enumIterator } from '~/utilities/utils';
 import { isAreaAvailable } from '~/concepts/areas/utils';
-import extensionDeclarations from '~/plugins/extensions';
 import { useUser } from '~/redux/selectors';
 import { PluginStore } from '~/plugins/plugin-store';
+import extensionDeclarations from '~/plugins/extensions';
+import modelServingExtensionDeclarations from '~/packages/modelServing/extensions';
+
+const allExtensions = [...extensionDeclarations, ...modelServingExtensionDeclarations];
 
 export const ExtensibilityContextProvider: React.FC<React.PropsWithChildren> = ({ children }) => {
   const { isAdmin } = useUser();
@@ -35,7 +38,7 @@ export const ExtensibilityContextProvider: React.FC<React.PropsWithChildren> = (
   );
 
   // create the plugin store
-  const store = React.useMemo(() => new PluginStore(extensionDeclarations), []);
+  const store = React.useMemo(() => new PluginStore(allExtensions), []);
 
   // update the feature flags on the plugin store
   React.useEffect(

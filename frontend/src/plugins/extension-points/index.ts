@@ -1,3 +1,4 @@
+/* eslint-disable no-barrel-files/no-barrel-files */
 import type { AnyObject, CodeRef } from '@openshift/dynamic-plugin-sdk';
 
 export type ComponentCodeRef<Props = AnyObject> = CodeRef<{ default: React.ComponentType<Props> }>;
@@ -34,3 +35,5 @@ export type ComponentCodeRef<Props = AnyObject> = CodeRef<{ default: React.Compo
 // >;
 // export const isTabExtension = (extension: Extension): extension is TabExtension =>
 //   extension.type === 'app.tab';
+
+export * from './projects/ProjectDetailsTabs';
