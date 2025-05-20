@@ -17,6 +17,7 @@ const extensions: (ModelServingPlatformExtension | ModelServingDeploymentsTableE
       },
       deployments: {
         list: () => import('./src/deployments').then((m) => m.listDeployments),
+        watch: () => import('./src/deployments').then((m) => m.useWatchDeployments),
       },
       enableCardText: {
         title: 'Single-model serving platform',

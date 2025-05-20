@@ -35,6 +35,12 @@ export type ModelServingPlatformExtension = Extension<
     };
     deployments: {
       list: CodeRef<(project: ProjectKind, opts: K8sAPIOptions) => Promise<Deployment[]>>;
+      watch: CodeRef<
+        (
+          project: ProjectKind,
+          opts?: K8sAPIOptions,
+        ) => [Deployment[] | undefined, boolean, Error | undefined]
+      >;
     };
     enableCardText: {
       title: string;

@@ -10,6 +10,17 @@ import { ProjectKind } from '@odh-dashboard/internal/k8sTypes';
 import { ModelServingPlatform } from './modelServingPlatforms';
 import { Deployment } from '../../extension-points';
 
+export const useWatchDeployments = (
+  project: ProjectKind,
+  modelServingPlatform?: ModelServingPlatform | null,
+): [Deployment[] | undefined, boolean, Error | undefined] => {
+  const useWatchPlatformDeployments = modelServingPlatform?.properties.deployments.watch;
+
+  const result = useWatchPlatformDeployments?.(project);
+
+  return result ?? [undefined, false, undefined];
+};
+
 export const useDeployedModels = (
   project: ProjectKind,
   modelServingPlatform?: ModelServingPlatform | null,

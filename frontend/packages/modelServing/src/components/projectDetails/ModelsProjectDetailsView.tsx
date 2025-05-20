@@ -12,6 +12,7 @@ import { ProjectObjectType } from '@odh-dashboard/internal/concepts/design/utils
 import { SelectPlatformView } from './SelectPlatformView';
 import { NoModelsView } from './NoModelsView';
 import DeploymentsTable from './DeploymentsTable';
+import { ProjectDeploymentsContext } from '../../concepts/ModelDeploymentsContext';
 import { DeployButton } from '../deploy/DeployButton';
 import { ModelServingContext } from '../../concepts/ModelServingContext';
 
@@ -23,8 +24,9 @@ const ModelsProjectDetailsView: React.FC = () => {
     setModelServingPlatform,
     resetModelServingPlatform,
     newModelServingPlatformLoading,
-    deployments,
+    // deployments,
   } = React.useContext(ModelServingContext);
+  const { deployments } = React.useContext(ProjectDeploymentsContext);
 
   const isLoading = !project || !availablePlatforms || !!(projectPlatform && !deployments);
   const hasModels = !!deployments && deployments.length > 0;
