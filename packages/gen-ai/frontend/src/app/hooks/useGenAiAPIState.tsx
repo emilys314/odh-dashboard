@@ -1,5 +1,6 @@
 import React from 'react';
 import { APIState, useAPIState } from 'mod-arch-core';
+import { useExtensions } from '@odh-dashboard/plugin-core';
 import { GenAiAPIs } from '~/app/types';
 import {
   getBFFConfig,
@@ -7,9 +8,7 @@ import {
   installLSD,
   deleteLSD,
   getAAModels,
-  getMaaSModels,
   exportCode,
-  generateMaaSToken,
   listVectorStores,
   createVectorStore,
   getLSDModels,
@@ -22,6 +21,7 @@ import {
   getMCPServerStatus,
   createResponse,
 } from '~/app/services/llamaStackService';
+import { isGenerateMaaSTokenExtension, isMaaSModelsExtension } from '~/odh/extension-points/maas';
 
 export type GenAiAPIState = APIState<GenAiAPIs>;
 
@@ -29,6 +29,12 @@ const useGenAiAPIState = (
   hostPath: string | null,
   queryParameters?: Record<string, unknown>,
 ): [apiState: GenAiAPIState, refreshAPIState: () => void] => {
+  const getMaaSModelsExtension = useExtensions(isMaaSModelsExtension);
+  const getMaaSModelsFunction = getMaaSModelsExtension[0].properties.getMaaSModels;
+
+  const generateMaaSTokenExtension = useExtensions(isGenerateMaaSTokenExtension);
+  const generateMaaSTokenFunction = generateMaaSTokenExtension[0].properties.generateMaaSToken;
+
   const createAPI = React.useCallback(
     (path: string) => ({
       listVectorStores: listVectorStores(path, queryParameters),
@@ -44,14 +50,15 @@ const useGenAiAPIState = (
       installLSD: installLSD(path, queryParameters),
       deleteLSD: deleteLSD(path, queryParameters),
       getAAModels: getAAModels(path, queryParameters),
-      getMaaSModels: getMaaSModels(path, queryParameters),
-      generateMaaSToken: generateMaaSToken(path, queryParameters),
+      // getMaaSModels: getMaaSModels(path, queryParameters),
+      getMaaSModels: () => getMaaSModelsFunction().then((response) => response), // MaaSModel[]
+      generateMaaSToken: () => generateMaaSTokenFunction().then((response) => response), // MaaSToken
       getMCPServerTools: getMCPServerTools(path, queryParameters),
       getMCPServers: getMCPServers(path, queryParameters),
       getMCPServerStatus: getMCPServerStatus(path, queryParameters),
       getBFFConfig: getBFFConfig(path, queryParameters),
     }),
-    [queryParameters],
+    [queryParameters, getMaaSModelsFunction, generateMaaSTokenFunction],
   );
 
   return useAPIState(hostPath, createAPI);
