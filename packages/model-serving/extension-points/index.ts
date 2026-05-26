@@ -543,6 +543,7 @@ export type DeploymentProgressStep = {
   title: string;
   status: DeploymentProgressStepStatus;
   description?: string;
+  timestamp?: string;
   children?: DeploymentProgressStep[];
 };
 

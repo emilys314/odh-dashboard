@@ -14,18 +14,12 @@ import {
   ProgressStepVariant,
   Stack,
   StackItem,
-  Tab,
-  Tabs,
-  TabTitleText,
 } from '@patternfly/react-core';
 import { ResolvedExtension } from '@openshift/dynamic-plugin-sdk';
 import { ModelStatusIcon } from '@odh-dashboard/internal/concepts/modelServing/ModelStatusIcon';
 import { ModelDeploymentState } from '@odh-dashboard/internal/pages/modelServing/screens/types';
 import { getDisplayNameFromK8sResource } from '@odh-dashboard/internal/concepts/k8s/utils';
-import DeploymentEventLog from './DeploymentEventLog';
-import DeploymentLogsTab from './DeploymentLogsTab';
 import { useResolvedDeploymentExtension } from '../../concepts/extensionUtils';
-import { useWatchDeploymentEvents } from '../../concepts/useWatchDeploymentEvents';
 import {
   Deployment,
   DeploymentProgressStep,
@@ -33,10 +27,6 @@ import {
   ModelServingDeploymentProgressStepsExtension,
 } from '../../../extension-points';
 import './DeploymentStatusModal.scss';
-
-const PROGRESS_TAB = 'Progress';
-const EVENT_LOG_TAB = 'Events';
-const LOGS_TAB = 'Logs';
 
 const progressStepVariants: Record<DeploymentProgressStep['status'], ProgressStepVariant> = {
   pending: ProgressStepVariant.pending,
@@ -52,6 +42,25 @@ type DeploymentStatusModalProps = {
   buttons: React.ReactNode;
 };
 
+const formatTimestamp = (ts: string): string => {
+  const date = new Date(ts);
+  if (Number.isNaN(date.getTime())) {
+    return ts;
+  }
+  return date.toLocaleString();
+};
+
+const buildDescription = (step: DeploymentProgressStep): string | undefined => {
+  const parts: string[] = [];
+  if (step.timestamp) {
+    parts.push(formatTimestamp(step.timestamp));
+  }
+  if (step.description) {
+    parts.push(step.description);
+  }
+  return parts.length > 0 ? parts.join(' — ') : undefined;
+};
+
 const ProgressStepsList: React.FC<{ steps: DeploymentProgressStep[] }> = ({ steps }) => (
   <ProgressStepper isVertical data-testid="deployment-progress-steps">
     {steps.map((step) => (
@@ -61,7 +70,7 @@ const ProgressStepsList: React.FC<{ steps: DeploymentProgressStep[] }> = ({ step
         aria-label={step.status}
         id={step.id}
         titleId={`${step.id}-title`}
-        description={step.description}
+        description={buildDescription(step)}
         data-testid={`progress-step-${step.id}`}
       >
         {step.title}
@@ -73,12 +82,15 @@ const ProgressStepsList: React.FC<{ steps: DeploymentProgressStep[] }> = ({ step
   </ProgressStepper>
 );
 
-type ResolvedProgressTabProps = {
+type ResolvedProgressContentProps = {
   deployment: Deployment;
   extension: ResolvedExtension<ModelServingDeploymentProgressStepsExtension>;
 };
 
-const ResolvedProgressTab: React.FC<ResolvedProgressTabProps> = ({ deployment, extension }) => {
+const ResolvedProgressContent: React.FC<ResolvedProgressContentProps> = ({
+  deployment,
+  extension,
+}) => {
   const progressSteps = extension.properties.useProgressSteps(deployment);
 
   if (progressSteps.length === 0) {
@@ -103,16 +115,10 @@ const DeploymentStatusModal: React.FC<DeploymentStatusModalProps> = ({
   onClose,
   buttons,
 }) => {
-  const [activeTab, setActiveTab] = React.useState<string>(PROGRESS_TAB);
-  const { namespace } = deployment.model.metadata;
-  const { name: deploymentName } = deployment.model.metadata;
-
   const [progressStepsExtension, extensionLoaded] = useResolvedDeploymentExtension(
     isModelServingDeploymentProgressSteps,
     deployment,
   );
-
-  const [events, eventsLoaded] = useWatchDeploymentEvents(namespace);
 
   const renderProgress = () => {
     if (!extensionLoaded) {
@@ -125,17 +131,13 @@ const DeploymentStatusModal: React.FC<DeploymentStatusModalProps> = ({
         </Content>
       );
     }
-    return <ResolvedProgressTab deployment={deployment} extension={progressStepsExtension} />;
+    return <ResolvedProgressContent deployment={deployment} extension={progressStepsExtension} />;
   };
-
-  const renderEvents = () => (
-    <DeploymentEventLog events={events} deploymentName={deploymentName} loaded={eventsLoaded} />
-  );
 
   return (
     <Modal
       appendTo={document.body}
-      variant={ModalVariant.medium}
+      variant={ModalVariant.small}
       isOpen
       onClose={onClose}
       data-testid="deployment-status-modal"
@@ -161,38 +163,8 @@ const DeploymentStatusModal: React.FC<DeploymentStatusModalProps> = ({
               {getDisplayNameFromK8sResource(deployment.model)}
             </Content>
           </StackItem>
-          <StackItem>
-            <Tabs
-              activeKey={activeTab}
-              onSelect={(_ev, tabIndex) => setActiveTab(`${tabIndex}`)}
-              aria-label="deployment status details"
-            >
-              <Tab
-                eventKey={PROGRESS_TAB}
-                aria-label={PROGRESS_TAB}
-                title={<TabTitleText>{PROGRESS_TAB}</TabTitleText>}
-                data-testid="expand-progress"
-              />
-              <Tab
-                eventKey={EVENT_LOG_TAB}
-                aria-label={EVENT_LOG_TAB}
-                title={<TabTitleText>{EVENT_LOG_TAB}</TabTitleText>}
-                data-testid="expand-events"
-              />
-              <Tab
-                eventKey={LOGS_TAB}
-                aria-label={LOGS_TAB}
-                title={<TabTitleText>{LOGS_TAB}</TabTitleText>}
-                data-testid="expand-logs"
-              />
-            </Tabs>
-          </StackItem>
           <StackItem isFilled className="deployment-status-modal__filled-stack-item">
-            {activeTab === PROGRESS_TAB && renderProgress()}
-            {activeTab === EVENT_LOG_TAB && renderEvents()}
-            {activeTab === LOGS_TAB && (
-              <DeploymentLogsTab namespace={namespace} deploymentName={deploymentName} />
-            )}
+            {renderProgress()}
           </StackItem>
         </Stack>
       </ModalBody>
