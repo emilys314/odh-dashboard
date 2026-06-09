@@ -13,7 +13,7 @@ import {
 import { ExclamationCircleIcon } from '@patternfly/react-icons';
 import ModelDeploymentWizard from './ModelDeploymentWizard';
 import { ModelDeploymentsProvider } from '../../concepts/ModelDeploymentsContext';
-import { useAvailableClusterPlatforms } from '../../concepts/useAvailableClusterPlatforms';
+import { useAvailableProjectPlatforms } from '../../concepts/useAvailableProjectPlatforms';
 import { useProjectServingPlatform } from '../../concepts/useProjectServingPlatform';
 
 const ErrorContent: React.FC<{ error: Error }> = ({ error }) => {
@@ -59,11 +59,14 @@ export const ModelDeploymentWizardPage: React.FC = () => {
     return projectName ? projects.find(byName(projectName)) : undefined;
   }, [projects, projectName]);
 
-  const { clusterPlatforms, clusterPlatformsLoaded, clusterPlatformsError } =
-    useAvailableClusterPlatforms();
-  const { activePlatform } = useProjectServingPlatform(currentProject, clusterPlatforms);
+  const {
+    data: availablePlatforms,
+    loaded: availablePlatformsLoaded,
+    error: availablePlatformsError,
+  } = useAvailableProjectPlatforms(currentProject?.metadata.name ?? null);
+  const { activePlatform } = useProjectServingPlatform(currentProject, availablePlatforms);
 
-  if (!projectsLoaded || !clusterPlatformsLoaded) {
+  if (!projectsLoaded || !availablePlatformsLoaded) {
     return (
       <Bullseye>
         <Spinner />
@@ -71,7 +74,7 @@ export const ModelDeploymentWizardPage: React.FC = () => {
     );
   }
 
-  if (clusterPlatformsError) {
+  if (availablePlatformsError) {
     return (
       <ErrorContent
         error={

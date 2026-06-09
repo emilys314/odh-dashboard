@@ -1,15 +1,17 @@
 import * as React from 'react';
 import { DataScienceStackComponent, SupportedArea, useIsAreaAvailable } from '#~/concepts/areas';
 import { ServingPlatformStatuses } from '#~/pages/modelServing/screens/types';
-import { useIsNIMAvailable } from '#~/pages/modelServing/screens/projects/nim/useIsNIMAvailable';
+import { useIsNIMProjectKeyEnabled } from './screens/projects/nim/nimProjectKeyUtils';
 
 const useServingPlatformStatuses = (
   shouldRefreshNimAvailability = false,
+  namespace?: string,
 ): ServingPlatformStatuses => {
   const kServeStatus = useIsAreaAvailable(SupportedArea.K_SERVE);
   const kServeEnabled = kServeStatus.status;
   const kServeInstalled = !!kServeStatus.requiredComponents?.[DataScienceStackComponent.K_SERVE];
-  const [isNIMAvailable, , , refreshNIMAvailability] = useIsNIMAvailable();
+  const { data: isNIMAvailable, refresh: refreshNIMAvailability } =
+    useIsNIMProjectKeyEnabled(namespace);
 
   React.useEffect(() => {
     if (shouldRefreshNimAvailability) {

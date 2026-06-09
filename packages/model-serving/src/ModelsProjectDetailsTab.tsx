@@ -1,12 +1,16 @@
 import React from 'react';
 import { ProjectDetailsContext } from '@odh-dashboard/internal/pages/projects/ProjectDetailsContext';
-import { LazyCodeRefComponent } from '@odh-dashboard/plugin-core';
+import { LazyCodeRefComponent, useExtensions } from '@odh-dashboard/plugin-core';
 import DetailsSection from '@odh-dashboard/internal/pages/projects/screens/detail/DetailsSection';
 import { ProjectSectionID } from '@odh-dashboard/internal/pages/projects/screens/detail/types';
-import { useProjectServingPlatform } from './concepts/useProjectServingPlatform';
+import {
+  ModelServingPlatform,
+  useProjectServingPlatform,
+} from './concepts/useProjectServingPlatform';
 import { ModelDeploymentsProvider } from './concepts/ModelDeploymentsContext';
 import ModelsProjectDetailsView from './components/projectDetails/ModelsProjectDetailsView';
-import { useAvailableClusterPlatforms } from './concepts/useAvailableClusterPlatforms';
+import { useAvailableProjectPlatforms } from './concepts/useAvailableProjectPlatforms';
+import { isModelServingPlatformExtension } from '../extension-points';
 
 const LoadingSection: React.FC<{ error?: Error }> = ({ error }) => (
   <DetailsSection
@@ -21,14 +25,20 @@ const LoadingSection: React.FC<{ error?: Error }> = ({ error }) => (
 );
 
 const ModelsProjectDetailsTab: React.FC = () => {
+  const allPlatforms = useExtensions<ModelServingPlatform>(isModelServingPlatformExtension);
+
   const { currentProject } = React.useContext(ProjectDetailsContext);
 
-  const { clusterPlatforms, clusterPlatformsLoaded, clusterPlatformsError } =
-    useAvailableClusterPlatforms();
-  const { activePlatform } = useProjectServingPlatform(currentProject, clusterPlatforms);
+  const { activePlatform } = useProjectServingPlatform(currentProject, allPlatforms);
 
-  if (!clusterPlatformsLoaded || !currentProject.metadata.name) {
-    return <LoadingSection error={clusterPlatformsError} />;
+  const {
+    data: availablePlatforms,
+    loaded: availablePlatformsLoaded,
+    error: availablePlatformsError,
+  } = useAvailableProjectPlatforms(currentProject.metadata.name);
+
+  if (!availablePlatformsLoaded || !currentProject.metadata.name) {
+    return <LoadingSection error={availablePlatformsError} />;
   }
   // TODO: remove this once modelmesh and nim are fully supported plugins
   if (activePlatform?.properties.backport?.ModelsProjectDetailsTab) {
@@ -42,7 +52,7 @@ const ModelsProjectDetailsTab: React.FC = () => {
 
   return (
     <ModelDeploymentsProvider projects={[currentProject]}>
-      <ModelsProjectDetailsView project={currentProject} platforms={clusterPlatforms} />
+      <ModelsProjectDetailsView project={currentProject} platforms={availablePlatforms} />
     </ModelDeploymentsProvider>
   );
 };

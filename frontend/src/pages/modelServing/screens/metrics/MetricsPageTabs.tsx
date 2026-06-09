@@ -23,11 +23,12 @@ type MetricsPageTabsProps = {
 };
 
 const MetricsPageTabs: React.FC<MetricsPageTabsProps> = ({ model }) => {
-  const servingPlatformStatuses = useServingPlatformStatuses();
-  const isNIMAvailable = servingPlatformStatuses.kServeNIM.enabled;
   const { projects } = React.useContext(ProjectsContext);
   const project = projects.find(byName(model.metadata.namespace));
   const enabledTabs = useMetricsPageEnabledTabs();
+
+  const servingPlatformStatuses = useServingPlatformStatuses(undefined, project?.metadata.name);
+  const isNIMAvailable = servingPlatformStatuses.kServeNIM.enabled;
   const isKServeNIMEnabled = project ? isProjectNIMSupported(project) : false;
   const isNimEnabled = isNIMAvailable && isKServeNIMEnabled;
   const { biasMetricConfigs, statusState } = useModelBiasData();

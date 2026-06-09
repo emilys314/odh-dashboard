@@ -49,10 +49,6 @@ const ModelServingPlatform: React.FC = () => {
 
   const [errorSelectingPlatform, setErrorSelectingPlatform] = React.useState<Error>();
 
-  const servingPlatformStatuses = useServingPlatformStatuses();
-  const kServeEnabled = servingPlatformStatuses.kServe.enabled;
-  const isNIMAvailable = servingPlatformStatuses.kServeNIM.enabled;
-
   const {
     servingRuntimes: {
       loaded: servingRuntimesLoaded,
@@ -70,6 +66,14 @@ const ModelServingPlatform: React.FC = () => {
     },
     currentProject,
   } = React.useContext(ProjectDetailsContext);
+
+  const servingPlatformStatuses = useServingPlatformStatuses(
+    undefined,
+    currentProject.metadata.name,
+  );
+  console.log('servingPlatformStatuses', servingPlatformStatuses);
+  const kServeEnabled = servingPlatformStatuses.kServe.enabled;
+  const isNIMAvailable = servingPlatformStatuses.kServeNIM.enabled;
 
   const isKServeNIMEnabled = isProjectNIMSupported(currentProject);
 
@@ -273,19 +277,16 @@ const ModelServingPlatform: React.FC = () => {
                       : 'Current platform disabled'}
                   </Label>
 
-                  {emptyModelServer &&
-                    (servingPlatformStatuses.platformEnabledCount > 1 ||
-                      !isCurrentPlatformEnabled ||
-                      platformError) && (
-                      <ModelServingPlatformSelectButton
-                        namespace={currentProject.metadata.name}
-                        servingPlatform={NamespaceApplicationCase.RESET_MODEL_SERVING_PLATFORM}
-                        setError={setErrorSelectingPlatform}
-                        variant="link"
-                        isInline
-                        data-testid="change-serving-platform-button"
-                      />
-                    )}
+                  {emptyModelServer && (
+                    <ModelServingPlatformSelectButton
+                      namespace={currentProject.metadata.name}
+                      servingPlatform={NamespaceApplicationCase.RESET_MODEL_SERVING_PLATFORM}
+                      setError={setErrorSelectingPlatform}
+                      variant="link"
+                      isInline
+                      data-testid="change-serving-platform-button"
+                    />
+                  )}
                 </Flex>,
               ]
             : undefined

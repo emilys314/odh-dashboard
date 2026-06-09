@@ -31,7 +31,7 @@ const ServeModelButton: React.FC = () => {
   } = React.useContext(ModelServingContext);
   const { projects } = React.useContext(ProjectsContext);
   const { namespace } = useParams<{ namespace: string }>();
-  const servingPlatformStatuses = useServingPlatformStatuses();
+  const servingPlatformStatuses = useServingPlatformStatuses(undefined, namespace);
   const isNIMAvailable = servingPlatformStatuses.kServeNIM.enabled;
 
   const project = projects.find(byName(namespace));

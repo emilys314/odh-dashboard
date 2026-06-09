@@ -3,7 +3,7 @@ import { renderHook } from '@odh-dashboard/jest-config/hooks';
 import { isEnabled } from '@odh-dashboard/internal/concepts/integrations/useIsComponentIntegrationEnabled';
 import { IntegrationAppStatus } from '@odh-dashboard/internal/types';
 import { NamespaceApplicationCase } from '@odh-dashboard/internal/pages/projects/types';
-import { useAvailableClusterPlatforms } from '../useAvailableClusterPlatforms';
+import { useAvailableProjectPlatforms } from '../useAvailableProjectPlatforms';
 import { ModelServingPlatform } from '../useProjectServingPlatform';
 import { mockExtensions, mockModelServingPlatform } from '../../__tests__/mockUtils';
 
@@ -80,7 +80,7 @@ describe('useAvailableClusterPlatforms', () => {
       refresh: mockRefresh,
     });
 
-    const { result } = renderHook(() => useAvailableClusterPlatforms());
+    const { result } = renderHook(() => useAvailableProjectPlatforms());
 
     expect(result.current.clusterPlatforms).toEqual(mockPlatforms.map(toLoadedExtension));
     expect(result.current.clusterPlatformsLoaded).toBe(true);
@@ -117,7 +117,7 @@ describe('useAvailableClusterPlatforms', () => {
       refresh: mockRefresh,
     });
 
-    const { result } = renderHook(() => useAvailableClusterPlatforms());
+    const { result } = renderHook(() => useAvailableProjectPlatforms());
 
     expect(result.current.clusterPlatforms).toEqual([toLoadedExtension(mockPlatforms[0], 0)]);
     expect(result.current.clusterPlatformsLoaded).toBe(true);
@@ -153,7 +153,7 @@ describe('useAvailableClusterPlatforms', () => {
       refresh: mockRefresh,
     });
 
-    const { result } = renderHook(() => useAvailableClusterPlatforms());
+    const { result } = renderHook(() => useAvailableProjectPlatforms());
 
     expect(result.current.clusterPlatforms).toEqual([
       toLoadedExtension(mockPlatforms[0], 0),
@@ -171,7 +171,7 @@ describe('useAvailableClusterPlatforms', () => {
       refresh: mockRefresh,
     });
 
-    const { result } = renderHook(() => useAvailableClusterPlatforms());
+    const { result } = renderHook(() => useAvailableProjectPlatforms());
 
     expect(result.current.clusterPlatforms).toEqual(mockPlatforms.map(toLoadedExtension));
     expect(result.current.clusterPlatformsLoaded).toBe(false);
@@ -187,7 +187,7 @@ describe('useAvailableClusterPlatforms', () => {
       refresh: mockRefresh,
     });
 
-    const { result } = renderHook(() => useAvailableClusterPlatforms());
+    const { result } = renderHook(() => useAvailableProjectPlatforms());
 
     expect(result.current.clusterPlatforms).toEqual(mockPlatforms.map(toLoadedExtension));
     expect(result.current.clusterPlatformsLoaded).toBe(true);
@@ -204,7 +204,7 @@ describe('useAvailableClusterPlatforms', () => {
       refresh: mockRefresh,
     });
 
-    const { result } = renderHook(() => useAvailableClusterPlatforms());
+    const { result } = renderHook(() => useAvailableProjectPlatforms());
 
     expect(result.current.clusterPlatforms).toEqual([]);
     expect(result.current.clusterPlatformsLoaded).toBe(true);
@@ -219,7 +219,7 @@ describe('useAvailableClusterPlatforms', () => {
       refresh: mockRefresh,
     });
 
-    const { result } = renderHook(() => useAvailableClusterPlatforms());
+    const { result } = renderHook(() => useAvailableProjectPlatforms());
 
     expect(result.current.clusterPlatforms).toEqual(mockPlatforms.map(toLoadedExtension));
     expect(result.current.clusterPlatformsLoaded).toBe(true);
@@ -253,7 +253,7 @@ describe('useAvailableClusterPlatforms', () => {
 
     mockUseContext.mockReturnValue(contextValue);
 
-    const { result, rerender } = renderHook(() => useAvailableClusterPlatforms());
+    const { result, rerender } = renderHook(() => useAvailableProjectPlatforms());
 
     // Should only have kserve platform
     expect(result.current.clusterPlatforms).toEqual([toLoadedExtension(mockPlatforms[0], 0)]);
@@ -320,7 +320,7 @@ describe('useAvailableClusterPlatforms', () => {
       refresh: mockRefresh,
     });
 
-    const { result } = renderHook(() => useAvailableClusterPlatforms());
+    const { result } = renderHook(() => useAvailableProjectPlatforms());
 
     expect(result.current.clusterPlatforms).toEqual([
       toLoadedExtension(mockPlatforms[0], 0),
@@ -339,7 +339,7 @@ describe('useAvailableClusterPlatforms', () => {
       refresh: mockRefresh,
     });
 
-    const { result, rerender } = renderHook(() => useAvailableClusterPlatforms());
+    const { result, rerender } = renderHook(() => useAvailableProjectPlatforms());
 
     const firstResult = result.current;
     rerender();

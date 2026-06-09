@@ -81,6 +81,7 @@ export type ModelServingPlatformExtension<D extends Deployment = Deployment> = E
         labels?: {
           [key: string]: string;
         };
+        resourceCheck?: CodeRef<(namespace?: string) => Promise<boolean>>;
       };
       clusterRequirements?: {
         // for NIM mainly. May change in the future. other types of checks can be added here later.

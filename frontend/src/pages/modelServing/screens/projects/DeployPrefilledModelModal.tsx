@@ -61,7 +61,10 @@ const DeployPrefilledModelModalContents: React.FC<
   } = React.useContext(ModelServingContext);
   const servingContextLoaded = templatesLoaded && templateOrderLoaded && templateDisablementLoaded;
 
-  const servingPlatformStatuses = useServingPlatformStatuses();
+  const servingPlatformStatuses = useServingPlatformStatuses(
+    undefined,
+    selectedProject?.metadata.name,
+  );
   const { platform, error: platformError } = getProjectModelServingPlatform(
     selectedProject,
     servingPlatformStatuses,

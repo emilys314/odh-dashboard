@@ -4,7 +4,7 @@ import { ProjectDetailsContext } from '@odh-dashboard/internal/pages/projects/Pr
 // eslint-disable-next-line @odh-dashboard/no-restricted-imports
 import ErrorOverviewCard from '@odh-dashboard/internal/pages/projects/screens/detail/overview/components/ErrorOverviewCard';
 import { ProjectObjectType, SectionType } from '@odh-dashboard/internal/concepts/design/utils';
-import { LazyCodeRefComponent } from '@odh-dashboard/plugin-core';
+import { LazyCodeRefComponent, useExtensions } from '@odh-dashboard/plugin-core';
 import { Bullseye, Card, CardBody, Spinner } from '@patternfly/react-core';
 import CollapsibleSection from '@odh-dashboard/internal/concepts/design/CollapsibleSection';
 import {
@@ -17,7 +17,8 @@ import {
 } from './concepts/useProjectServingPlatform';
 import ModelPlatformSection from './components/overview/ModelPlatformSection';
 import DeployedModelsSection from './components/overview/DeployedModelsSection';
-import { useAvailableClusterPlatforms } from './concepts/useAvailableClusterPlatforms';
+import { useAvailableProjectPlatforms } from './concepts/useAvailableProjectPlatforms';
+import { isModelServingPlatformExtension } from '../extension-points';
 
 const EmptyLoadingSection: React.FC = () => (
   <CollapsibleSection title="Serve models" data-testid="section-model-server">
@@ -69,10 +70,14 @@ const ServeModelsSectionContent: React.FC<{ platforms: ModelServingPlatform[] }>
 const ServeModelsSection: React.FC = () => {
   const { currentProject } = React.useContext(ProjectDetailsContext);
 
-  const { clusterPlatforms, clusterPlatformsLoaded } = useAvailableClusterPlatforms();
-  const { activePlatform } = useProjectServingPlatform(currentProject, clusterPlatforms);
+  const allPlatforms = useExtensions<ModelServingPlatform>(isModelServingPlatformExtension);
 
-  if (!clusterPlatformsLoaded || !currentProject.metadata.name) {
+  const { activePlatform } = useProjectServingPlatform(currentProject, allPlatforms);
+
+  const { data: availablePlatforms, loaded: availablePlatformsLoaded } =
+    useAvailableProjectPlatforms(currentProject.metadata.name);
+
+  if (!availablePlatformsLoaded || !currentProject.metadata.name) {
     return <EmptyLoadingSection />;
   }
 
@@ -88,7 +93,7 @@ const ServeModelsSection: React.FC = () => {
 
   return (
     <ModelDeploymentsProvider projects={[currentProject]}>
-      <ServeModelsSectionContent platforms={clusterPlatforms} />
+      <ServeModelsSectionContent platforms={availablePlatforms} />
     </ModelDeploymentsProvider>
   );
 };

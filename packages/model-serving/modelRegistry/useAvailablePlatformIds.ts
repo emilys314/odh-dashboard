@@ -1,13 +1,13 @@
 import React from 'react';
-import { useAvailableClusterPlatforms } from '../src/concepts/useAvailableClusterPlatforms';
+import { useAvailableProjectPlatforms } from '../src/concepts/useAvailableProjectPlatforms';
 
 /**
  * Returns the available cluster platforms.
  */
 const useAvailablePlatformIds = (): string[] => {
-  const { clusterPlatforms } = useAvailableClusterPlatforms();
+  const { data: availablePlatforms } = useAvailableProjectPlatforms(null);
 
-  return React.useMemo(() => clusterPlatforms.map((p) => p.properties.id), [clusterPlatforms]);
+  return React.useMemo(() => availablePlatforms.map((p) => p.properties.id), [availablePlatforms]);
 };
 
 export default useAvailablePlatformIds;

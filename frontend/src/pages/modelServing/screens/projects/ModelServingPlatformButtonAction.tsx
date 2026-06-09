@@ -21,7 +21,10 @@ const ModelServingPlatformButtonAction: React.FC<ModelServingPlatformButtonActio
     servingRuntimeTemplates: [, templatesLoaded],
     currentProject,
   } = React.useContext(ProjectDetailsContext);
-  const servingPlatformStatuses = useServingPlatformStatuses();
+  const servingPlatformStatuses = useServingPlatformStatuses(
+    undefined,
+    currentProject.metadata.name,
+  );
   const isNIMAvailable = servingPlatformStatuses.kServeNIM.enabled;
   const isKServeNIMEnabled = isProjectNIMSupported(currentProject);
   const isNimDisabled = !isNIMAvailable && isKServeNIMEnabled;

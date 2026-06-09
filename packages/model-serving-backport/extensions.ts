@@ -20,9 +20,10 @@ const extensions: ModelServingPlatformExtension[] = [
           annotations: {
             'opendatahub.io/nim-support': 'true',
           },
-        },
-        clusterRequirements: {
-          integrationAppName: 'nvidia-nim',
+          resourceCheck: () =>
+            import(
+              '@odh-dashboard/internal/pages/modelServing/screens/projects/nim/nimProjectKeyUtils'
+            ).then((m) => m.isProjectNIMAccountReady),
         },
       },
       enableCardText: {
@@ -54,6 +55,7 @@ const extensions: ModelServingPlatformExtension[] = [
     },
     flags: {
       required: [SupportedArea.NIM_MODEL],
+      disallowed: [SupportedArea.NIM_WIZARD],
     },
   },
 ];

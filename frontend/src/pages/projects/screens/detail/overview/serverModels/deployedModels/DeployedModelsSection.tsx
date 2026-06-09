@@ -41,7 +41,10 @@ const DeployedModelsSection: React.FC = () => {
     },
   } = React.useContext(ProjectDetailsContext);
 
-  const servingPlatformStatuses = useServingPlatformStatuses();
+  const servingPlatformStatuses = useServingPlatformStatuses(
+    undefined,
+    currentProject.metadata.name,
+  );
   const { error: platformError } = getProjectModelServingPlatform(
     currentProject,
     servingPlatformStatuses,

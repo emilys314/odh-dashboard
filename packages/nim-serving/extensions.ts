@@ -158,14 +158,6 @@ const extensions: (
   | WizardFieldExtractorExtension<NIMPVCFieldValue, NIMDeployment>
 )[] = [
   {
-    type: 'app.area',
-    properties: {
-      id: SupportedArea.NIM_WIZARD,
-      featureFlags: ['nimWizard'],
-      reliantAreas: [SupportedArea.NIM_MODEL],
-    },
-  },
-  {
     type: 'app.project-details/settings-card',
     properties: {
       id: 'nim-settings',
@@ -173,7 +165,15 @@ const extensions: (
       component: () => import('./src/pages/projectSettings/NIMSettingsCard'),
     },
     flags: {
-      required: [SupportedArea.NIM_WIZARD],
+      required: [SupportedArea.NIM_MODEL], // Allow legacy NIM to use proejct api keys
+    },
+  },
+  {
+    type: 'app.area',
+    properties: {
+      id: SupportedArea.NIM_WIZARD,
+      featureFlags: ['nimWizard'],
+      reliantAreas: [SupportedArea.NIM_MODEL],
     },
   },
   {
