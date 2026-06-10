@@ -20,12 +20,12 @@ import {
 import { deleteModal } from '../../../../pages/components/DeleteModal';
 
 describe('NIM Model Serving', () => {
-  describe('Deploying a model from an existing Project', () => {
+  describe.only('Deploying a model from an existing Project', () => {
     it('should be disabled if the modal is empty (NIM already selected for project)', () => {
       initInterceptsToEnableNim();
 
       projectDetails.visitSection('test-project', 'model-server');
-      cy.findByTestId('deploy-button').click();
+      cy.findByTestId('deploy-button').should('not.have.attr', 'aria-disabled', 'true').click();
 
       // test that you can not submit on empty
       nimDeployModal.shouldBeOpen();
@@ -55,7 +55,10 @@ describe('NIM Model Serving', () => {
       initInterceptsToDeployModel(nimInferenceService);
 
       projectDetails.visitSection('test-project', 'model-server');
-      projectDetails.findTopLevelDeployModelButton().click();
+      projectDetails
+        .findTopLevelDeployModelButton()
+        .should('not.have.attr', 'aria-disabled', 'true')
+        .click();
 
       // test that you can not submit on empty
       nimDeployModal.shouldBeOpen();

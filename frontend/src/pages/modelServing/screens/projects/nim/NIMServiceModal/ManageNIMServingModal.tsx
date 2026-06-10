@@ -54,7 +54,6 @@ import {
   getNIMServingRuntimeTemplate,
   updateServingRuntimeTemplate,
 } from '#~/pages/modelServing/screens/projects/nim/nimUtils';
-import { useDashboardNamespace } from '#~/redux/selectors';
 import { getServingRuntimeFromTemplate } from '#~/pages/modelServing/customServingRuntimes/utils';
 import { useNIMPVC } from '#~/pages/modelServing/screens/projects/nim/NIMServiceModal/useNIMPVC';
 import AuthServingRuntimeSection from '#~/pages/modelServing/screens/projects/ServingRuntimeModal/AuthServingRuntimeSection';
@@ -212,8 +211,7 @@ const ManageNIMServingModal: React.FC<ManageNIMServingModalProps> = ({
       (envVar) => !envVar.name || !!validateEnvVarName(envVar.name),
     );
 
-  const { dashboardNamespace } = useDashboardNamespace();
-  const templateName = useNIMTemplateName();
+  const templateName = useNIMTemplateName(namespace);
 
   React.useEffect(() => {
     if (editInfo?.servingRuntimeEditInfo?.servingRuntime) {
@@ -221,14 +219,14 @@ const ManageNIMServingModal: React.FC<ManageNIMServingModalProps> = ({
     } else {
       const fetchNIMServingRuntimeTemplate = async () => {
         if (templateName) {
-          const nimTemplate = await getNIMServingRuntimeTemplate(dashboardNamespace, templateName);
+          const nimTemplate = await getNIMServingRuntimeTemplate(namespace, templateName);
           setServingRuntimeSelected(getServingRuntimeFromTemplate(nimTemplate));
         }
       };
 
       fetchNIMServingRuntimeTemplate();
     }
-  }, [templateName, dashboardNamespace, editInfo]);
+  }, [templateName, namespace, editInfo]);
 
   // Extract and initialize pvcSubPath from existing serving runtime in edit mode
   React.useEffect(() => {
@@ -250,14 +248,14 @@ const ManageNIMServingModal: React.FC<ManageNIMServingModalProps> = ({
     }
   }, [editInfo]);
 
-  const isSecretNeeded = async (ns: string, secretName: string): Promise<boolean> => {
-    try {
-      await getSecret(ns, secretName);
-      return false; // Secret exists, no need to create
-    } catch {
-      return true; // Secret does not exist, needs to be created
-    }
-  };
+  // const isSecretNeeded = async (ns: string, secretName: string): Promise<boolean> => {
+  //   try {
+  //     await getSecret(ns, secretName);
+  //     return false; // Secret exists, no need to create
+  //   } catch {
+  //     return true; // Secret does not exist, needs to be created
+  //   }
+  // };
 
   const onBeforeClose = (submitted: boolean) => {
     onClose(submitted);
@@ -343,12 +341,12 @@ const ManageNIMServingModal: React.FC<ManageNIMServingModalProps> = ({
         ];
 
         if (!editInfo) {
-          if (await isSecretNeeded(namespace, NIM_SECRET_NAME)) {
-            promises.push(createNIMSecret(namespace, 'apiKeySecret', false, false));
-          }
-          if (await isSecretNeeded(namespace, NIM_NGC_SECRET_NAME)) {
-            promises.push(createNIMSecret(namespace, 'nimPullSecret', true, false));
-          }
+          // if (await isSecretNeeded(namespace, NIM_SECRET_NAME)) {
+          //   promises.push(createNIMSecret(namespace, 'apiKeySecret', false, false));
+          // }
+          // if (await isSecretNeeded(namespace, NIM_NGC_SECRET_NAME)) {
+          //   promises.push(createNIMSecret(namespace, 'nimPullSecret', true, false));
+          // }
           if (pvcMode === 'create-new') {
             promises.push(createNIMPVC(namespace, nimPVCName, pvcSize, false, storageClassName));
           }
@@ -418,6 +416,7 @@ const ManageNIMServingModal: React.FC<ManageNIMServingModalProps> = ({
                   setInferenceServiceData={setCreateDataInferenceService}
                   setServingRuntimeData={setCreateDataServingRuntime}
                   isEditing={!!editInfo}
+                  namespace={namespace}
                 />
               </StackItem>
             </StackItem>

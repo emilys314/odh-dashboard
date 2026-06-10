@@ -13,6 +13,7 @@ type NIMModelListSectionProps = {
   setInferenceServiceData: UpdateObjectAtPropAndValue<CreatingInferenceServiceObject>;
   setServingRuntimeData: UpdateObjectAtPropAndValue<CreatingServingRuntimeObject>;
   isEditing?: boolean;
+  namespace: string;
 };
 
 const NIMModelListSection: React.FC<NIMModelListSectionProps> = ({
@@ -20,6 +21,7 @@ const NIMModelListSection: React.FC<NIMModelListSectionProps> = ({
   setInferenceServiceData,
   setServingRuntimeData,
   isEditing,
+  namespace,
 }) => {
   const [modelList, setModelList] = React.useState<ModelInfo[]>([]);
   const [options, setOptions] = React.useState<TypeaheadSelectOption[]>([]);
@@ -29,7 +31,7 @@ const NIMModelListSection: React.FC<NIMModelListSectionProps> = ({
   React.useEffect(() => {
     const getModelNames = async () => {
       try {
-        const modelInfos = await fetchNIMModelNames();
+        const modelInfos = await fetchNIMModelNames(namespace);
         if (modelInfos && modelInfos.length > 0) {
           const normalizeVersion = (tag: string) => {
             if (/^\d+(\.\d+)*$/.test(tag)) {
@@ -83,7 +85,7 @@ const NIMModelListSection: React.FC<NIMModelListSectionProps> = ({
     };
 
     getModelNames();
-  }, [isEditing, inferenceServiceData.format.name]);
+  }, [isEditing, inferenceServiceData.format.name, namespace]);
 
   const extractModelAndVersion = (key: string) => {
     const matchedModelsInfo = modelList.filter((model) => key.startsWith(`${model.name}-`));

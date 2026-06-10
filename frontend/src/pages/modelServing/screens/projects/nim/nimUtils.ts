@@ -183,10 +183,10 @@ export const getNIMResourcesToDelete = async (
 ): Promise<Promise<void>[]> => {
   const resourcesToDelete: Promise<void>[] = [];
 
-  let inferenceCount = 0;
+  // let inferenceCount = 0;
 
   try {
-    inferenceCount = await fetchInferenceServiceCount(projectName);
+    // inferenceCount = await fetchInferenceServiceCount(projectName);
   } catch (error) {
     if (error instanceof Error) {
       // eslint-disable-next-line no-console
@@ -275,33 +275,33 @@ export const getNIMResourcesToDelete = async (
   }
 
   // Handle secrets deletion (only if this is the last inference service)
-  let nimSecretName: string | undefined;
-  let imagePullSecretName: string | undefined;
+  // let nimSecretName: string | undefined;
+  // let imagePullSecretName: string | undefined;
 
-  // K8s resources can arrive without spec at runtime (RHOAIENG-32511)
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-  const pullNGCSecret = servingRuntime.spec?.imagePullSecrets?.[0]?.name ?? '';
-  if (pullNGCSecret === 'ngc-secret') {
-    imagePullSecretName = pullNGCSecret;
-  }
+  // // K8s resources can arrive without spec at runtime (RHOAIENG-32511)
+  // // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  // const pullNGCSecret = servingRuntime.spec?.imagePullSecrets?.[0]?.name ?? '';
+  // if (pullNGCSecret === 'ngc-secret') {
+  //   imagePullSecretName = pullNGCSecret;
+  // }
 
-  // K8s resources can arrive without spec at runtime (RHOAIENG-32511)
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-  servingRuntime.spec?.containers?.forEach((container) => {
-    container.env?.forEach((env) => {
-      const secretName = env.valueFrom?.secretKeyRef?.name;
-      if (secretName === 'nvidia-nim-secrets') {
-        nimSecretName = secretName;
-      }
-    });
-  });
+  // // K8s resources can arrive without spec at runtime (RHOAIENG-32511)
+  // // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+  // servingRuntime.spec?.containers?.forEach((container) => {
+  //   container.env?.forEach((env) => {
+  //     const secretName = env.valueFrom?.secretKeyRef?.name;
+  //     if (secretName === 'nvidia-nim-secrets') {
+  //       nimSecretName = secretName;
+  //     }
+  //   });
+  // });
 
-  if (nimSecretName && imagePullSecretName && inferenceCount === 1) {
-    resourcesToDelete.push(
-      deleteSecret(projectName, nimSecretName).then(() => undefined),
-      deleteSecret(projectName, imagePullSecretName).then(() => undefined),
-    );
-  }
+  // if (nimSecretName && imagePullSecretName && inferenceCount === 1) {
+  //   resourcesToDelete.push(
+  //     deleteSecret(projectName, nimSecretName).then(() => undefined),
+  //     deleteSecret(projectName, imagePullSecretName).then(() => undefined),
+  //   );
+  // }
 
   return resourcesToDelete;
 };

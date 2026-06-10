@@ -1,6 +1,5 @@
 import * as React from 'react';
 import {
-  ConfigMapKind,
   InferenceServiceKind,
   PersistentVolumeClaimKind,
   ProjectKind,
@@ -30,11 +29,12 @@ import {
   createSecret,
   createServingRuntime,
   getInferenceServiceContext,
+  getNIMConfigMap,
   updateInferenceService,
   updateServingRuntime,
 } from '#~/api';
 import { containsOnlySlashes, isS3PathValid, removeLeadingSlash } from '#~/utilities/string';
-import { getNIMData, getNIMResource } from '#~/pages/modelServing/screens/projects/nim/nimUtils';
+import { getNIMData } from '#~/pages/modelServing/screens/projects/nim/nimUtils';
 import { Connection } from '#~/concepts/connectionTypes/types';
 import {
   isModelServingCompatible,
@@ -527,9 +527,9 @@ export interface ModelInfo {
   updatedDate: string;
 }
 
-export const fetchNIMModelNames = async (): Promise<ModelInfo[] | undefined> => {
-  const configMap = await getNIMResource<ConfigMapKind>('nimConfig');
-  if (configMap.data && Object.keys(configMap.data).length > 0) {
+export const fetchNIMModelNames = async (namespace: string): Promise<ModelInfo[] | undefined> => {
+  const configMap = await getNIMConfigMap(namespace);
+  if (configMap?.data && Object.keys(configMap.data).length > 0) {
     const modelInfos: ModelInfo[] = [];
     for (const [key, value] of Object.entries(configMap.data)) {
       try {

@@ -132,6 +132,7 @@ const ExploreApplications: React.FC = () => {
       _.cloneDeep(components)
         .filter((component) => !component.spec.hidden)
         .filter((component) => component.metadata.name !== 'mlflow' || mlflowEnabled)
+        .filter((component) => component.metadata.name !== 'nim-account')
         .toSorted((a, b) => a.spec.displayName.localeCompare(b.spec.displayName)),
     [components, mlflowEnabled],
   );

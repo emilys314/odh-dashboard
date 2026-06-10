@@ -99,16 +99,14 @@ const DeployedModelsSection: React.FC = () => {
               <Label>
                 {isKServeNIMEnabled ? 'NVIDIA NIM serving enabled' : 'Single-model serving enabled'}
               </Label>
-              {servingPlatformStatuses.platformEnabledCount > 1 && (
-                <ModelServingPlatformSelectButton
-                  namespace={currentProject.metadata.name}
-                  servingPlatform={NamespaceApplicationCase.RESET_MODEL_SERVING_PLATFORM}
-                  setError={setErrorSelectingPlatform}
-                  variant="link"
-                  isInline
-                  data-testid="change-serving-platform-button"
-                />
-              )}
+              <ModelServingPlatformSelectButton
+                namespace={currentProject.metadata.name}
+                servingPlatform={NamespaceApplicationCase.RESET_MODEL_SERVING_PLATFORM}
+                setError={setErrorSelectingPlatform}
+                variant="link"
+                isInline
+                data-testid="change-serving-platform-button"
+              />
             </Flex>
           }
         >

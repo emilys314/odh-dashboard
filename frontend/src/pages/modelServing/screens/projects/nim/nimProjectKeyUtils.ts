@@ -1,6 +1,6 @@
 import React from 'react';
-import { listNIMAccounts } from '#~/api/index.ts';
-import { K8sCondition, NIMAccountKind } from '#~/k8sTypes.ts';
+import { getNIMAccount } from '#~/api/index';
+import { K8sCondition, NIMAccountKind } from '#~/k8sTypes';
 import useFetch, { FetchStateObject } from '#~/utilities/useFetch';
 
 export const isAccountReady = (account: NIMAccountKind): boolean => {
@@ -13,16 +13,7 @@ export const isProjectNIMAccountReady = async (namespace?: string): Promise<bool
     return false;
   }
 
-  const accounts = await listNIMAccounts(namespace);
-  // Find the account with the name we expect 'odh-nim-account'. Fallback to one we don't know the name of.
-  let account: NIMAccountKind | undefined;
-  for (const a of accounts) {
-    if (a.metadata.name === 'odh-nim-account') {
-      account = a;
-      break;
-    }
-    account = a;
-  }
+  const account = await getNIMAccount(namespace);
 
   if (!account) {
     return false;

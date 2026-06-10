@@ -1,19 +1,17 @@
 import * as React from 'react';
 import { fetchNIMAccountTemplateName } from '#~/pages/modelServing/screens/projects/nim/nimUtils';
-import { useDashboardNamespace } from '#~/redux/selectors';
 
-export const useNIMTemplateName = (): string | undefined => {
-  const { dashboardNamespace } = useDashboardNamespace();
+export const useNIMTemplateName = (namespace: string): string | undefined => {
   const [templateName, setTemplateName] = React.useState<string>();
 
   React.useEffect(() => {
     const fetchTemplateName = async () => {
-      const template = await fetchNIMAccountTemplateName(dashboardNamespace);
+      const template = await fetchNIMAccountTemplateName(namespace);
       setTemplateName(template);
     };
 
     fetchTemplateName();
-  }, [dashboardNamespace]);
+  }, [namespace]);
 
   return templateName;
 };

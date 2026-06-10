@@ -40,7 +40,7 @@ import {
    ################################################### */
 
 // intercept all APIs required for enabling NIM
-export const initInterceptsToEnableNim = (): void => {
+export const initInterceptsToEnableNim = (namespace = 'test-project'): void => {
   cy.interceptOdh(
     'GET /api/dsc/status',
     mockDscStatus({
@@ -58,24 +58,25 @@ export const initInterceptsToEnableNim = (): void => {
     }),
   );
 
-  cy.interceptOdh('GET /api/components', null, [mockOdhApplication({})]);
+  // cy.interceptOdh('GET /api/components', null, [mockOdhApplication({})]);
 
-  cy.interceptOdh(
-    'GET /api/integrations/:internalRoute',
-    { path: { internalRoute: 'nim' } },
-    {
-      isInstalled: true,
-      isEnabled: true,
-      canInstall: false,
-      error: '',
-    },
-  );
+  // cy.interceptOdh(
+  //   'GET /api/integrations/:internalRoute',
+  //   { path: { internalRoute: 'nim' } },
+  //   {
+  //     isInstalled: true,
+  //     isEnabled: true,
+  //     canInstall: false,
+  //     error: '',
+  //   },
+  // );
 
-  cy.interceptK8sList(NIMAccountModel, mockK8sResourceList([mockNimAccount({})]));
-  cy.interceptK8sList(ProjectModel, mockK8sResourceList([mockNimProject({})]));
+  cy.interceptK8sList(NIMAccountModel, mockK8sResourceList([mockNimAccount({ namespace })]));
+  cy.interceptK8sList(ProjectModel, mockK8sResourceList([mockNimProject({ k8sName: namespace })]));
 
-  const templateMock = mockNimServingRuntimeTemplate();
-  cy.interceptK8sList(TemplateModel, mockK8sResourceList([templateMock]));
+  const globalTemplate = mockNimServingRuntimeTemplate('opendatahub');
+  const templateMock = mockNimServingRuntimeTemplate(namespace);
+  cy.interceptK8sList(TemplateModel, mockK8sResourceList([globalTemplate, templateMock]));
   cy.interceptK8s(TemplateModel, templateMock);
 
   cy.interceptK8sList(
@@ -92,23 +93,26 @@ export const initInterceptsToDeployModel = (nimInferenceService: InferenceServic
 
   cy.interceptK8s('POST', ServingRuntimeModel, mockNimServingRuntime()).as('createServingRuntime');
 
-  cy.interceptOdh(
-    `GET /api/nim-serving/:resource`,
-    { path: { resource: 'nimConfig' } },
-    mockNimServingResource(mockNimImages()),
-  );
+  // cy.interceptOdh(
+  //   `GET /api/nim-serving/:resource`,
+  //   { path: { resource: 'nimConfig' } },
+  //   mockNimServingResource(mockNimImages()),
+  // );
+  cy.interceptK8s('GET', ConfigMapModel, mockNimImages());
 
-  cy.interceptOdh(
-    `GET /api/nim-serving/:resource`,
-    { path: { resource: 'apiKeySecret' } },
-    mockNimServingResource(mockNvidiaNimAccessSecret()),
-  );
+  // cy.interceptOdh(
+  //   `GET /api/nim-serving/:resource`,
+  //   { path: { resource: 'apiKeySecret' } },
+  //   mockNimServingResource(mockNvidiaNimAccessSecret()),
+  // );
+  cy.interceptK8s('GET', SecretModel, mockNvidiaNimAccessSecret());
 
-  cy.interceptOdh(
-    `GET /api/nim-serving/:resource`,
-    { path: { resource: 'nimPullSecret' } },
-    mockNimServingResource(mockNvidiaNimImagePullSecret()),
-  );
+  // cy.interceptOdh(
+  //   `GET /api/nim-serving/:resource`,
+  //   { path: { resource: 'nimPullSecret' } },
+  //   mockNimServingResource(mockNvidiaNimImagePullSecret()),
+  // );
+  cy.interceptK8s('GET', SecretModel, mockNvidiaNimImagePullSecret());
 
   cy.interceptK8s('POST', PVCModel, mockNimModelPVC());
   cy.interceptK8s('GET', NIMAccountModel, mockNimAccount({}));
@@ -147,6 +151,7 @@ export const initInterceptsForDeleteModel = (): void => {
 export const initInterceptorsValidatingNimEnablement = (
   dashboardConfig: MockDashboardConfigType,
   disableServingRuntime = false,
+  namespace = 'test-project',
 ): void => {
   cy.interceptOdh('GET /api/config', mockDashboardConfig(dashboardConfig));
 
@@ -171,7 +176,7 @@ export const initInterceptorsValidatingNimEnablement = (
       error: '',
     },
   );
-  cy.interceptK8sList(NIMAccountModel, mockK8sResourceList([mockNimAccount({})]));
+  cy.interceptK8sList(NIMAccountModel, mockK8sResourceList([mockNimAccount({ namespace })]));
 
   cy.interceptK8sList(
     ProjectModel,
@@ -179,7 +184,7 @@ export const initInterceptorsValidatingNimEnablement = (
   );
 
   // Template intercepts needed for platform selection UI
-  const templateMock = mockNimServingRuntimeTemplate();
+  const templateMock = mockNimServingRuntimeTemplate(namespace);
   cy.interceptK8sList(TemplateModel, mockK8sResourceList([templateMock]));
   cy.interceptK8s(TemplateModel, templateMock);
 };

@@ -106,13 +106,13 @@ export const mockNimServingRuntime = (): ServingRuntimeKind => {
   return servingRuntime;
 };
 
-export const mockNimServingRuntimeTemplate = (): TemplateKind => {
+export const mockNimServingRuntimeTemplate = (namespace: string): TemplateKind => {
   const templateMock = mockServingRuntimeTemplateK8sResource({
     name: 'mock-nvidia-nim-serving-template',
     displayName: 'NVIDIA NIM',
     platforms: [ServingRuntimePlatform.SINGLE],
     apiProtocol: ServingRuntimeAPIProtocol.REST,
-    namespace: 'opendatahub',
+    namespace,
   });
   if (templateMock.metadata.annotations != null) {
     templateMock.metadata.annotations['opendatahub.io/dashboard'] = 'true';
