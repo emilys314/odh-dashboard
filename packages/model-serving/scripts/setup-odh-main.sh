@@ -18,6 +18,7 @@ set -euo pipefail
 #   ./setup-odh-main.sh                    # Uses main image
 #   ./setup-odh-main.sh pr-5476            # Uses a specific PR image
 #   ./setup-odh-main.sh v2.38.2-odh        # Uses a specific version
+#   ./setup-odh-main.sh sha256:abc123...   # Uses a specific image digest
 #   ./setup-odh-main.sh --skip-setup       # Skip PVC/CSV setup (if already done)
 #   ./setup-odh-main.sh --skip-setup main  # Skip setup and use main image
 # =============================================================================
@@ -94,8 +95,8 @@ Options:
     --help, -h      Show this help message
 
 Arguments:
-    IMAGE_TAG       The image tag to use (default: main)
-                    Examples: main, pr-5476, v2.38.2-odh
+    IMAGE_TAG       The image tag or digest to use (default: main)
+                    Examples: main, pr-5476, v2.38.2-odh, sha256:abc123...
 
 Environment Variables:
     DASHBOARD_IMAGE_REPO    Image repository (default: quay.io/opendatahub/odh-dashboard)
@@ -105,9 +106,10 @@ Environment Variables:
     SKIP_SETUP              Skip PVC/CSV setup (default: false)
 
 Examples:
-    $(basename "$0")                    # Use main image
-    $(basename "$0") pr-5476            # Use PR image
-    $(basename "$0") --skip-setup main  # Skip setup, use main image
+    $(basename "$0")                              # Use main image
+    $(basename "$0") pr-5476                      # Use PR image
+    $(basename "$0") sha256:abc123...             # Use image digest
+    $(basename "$0") --skip-setup main            # Skip setup, use main image
 EOF
 }
 
@@ -280,7 +282,7 @@ perform_one_time_setup() {
 
 # Update the deployment.yaml with the new image
 update_deployment_manifest() {
-    local image="${DASHBOARD_IMAGE_REPO}:${DASHBOARD_IMAGE_TAG}"
+    local image="${DASHBOARD_IMAGE}"
 
     log_info "Updating deployment.yaml with image: ${image}"
 
@@ -306,8 +308,8 @@ update_deployment_manifest() {
         sed -i.bak "s|\$(odh-dashboard-image)|${image}|g" "${temp_deployment}" && rm -f "${temp_deployment}.bak"
         log_info "Replaced \$(odh-dashboard-image) with ${image}"
     elif grep -q 'image:.*quay.io/opendatahub/odh-dashboard' "${temp_deployment}"; then
-        # If there's already a concrete image, replace it
-        sed -i.bak "s|image:.*quay.io/opendatahub/odh-dashboard:[^[:space:]]*|image: ${image}|g" "${temp_deployment}" && rm -f "${temp_deployment}.bak"
+        # If there's already a concrete image (tag or digest), replace it
+        sed -i.bak "s|image:.*quay.io/opendatahub/odh-dashboard[@:][^[:space:]]*|image: ${image}|g" "${temp_deployment}" && rm -f "${temp_deployment}.bak"
         log_info "Updated existing dashboard image to ${image}"
     else
         log_warn "Could not find image placeholder or existing image in deployment.yaml"
@@ -377,7 +379,7 @@ wait_for_dashboard() {
 
     local max_attempts=60
     local attempt=0
-    local expected_image="${DASHBOARD_IMAGE_REPO}:${DASHBOARD_IMAGE_TAG}"
+    local expected_image="${DASHBOARD_IMAGE}"
 
     while [[ $attempt -lt $max_attempts ]]; do
         # Check if dashboard deployment exists
@@ -463,12 +465,19 @@ cleanup() {
 main() {
     parse_args "$@"
 
+    # Build the full image reference: use @ for sha digests, : for tags
+    if [[ "${DASHBOARD_IMAGE_TAG}" == sha256:* ]]; then
+        DASHBOARD_IMAGE="${DASHBOARD_IMAGE_REPO}@${DASHBOARD_IMAGE_TAG}"
+    else
+        DASHBOARD_IMAGE="${DASHBOARD_IMAGE}"
+    fi
+
     echo "=============================================="
     echo "ODH Dashboard Image Update Script"
     echo "=============================================="
     echo ""
     echo "Configuration:"
-    echo "  Image: ${DASHBOARD_IMAGE_REPO}:${DASHBOARD_IMAGE_TAG}"
+    echo "  Image: ${DASHBOARD_IMAGE}"
     echo "  Skip Setup: ${SKIP_SETUP}"
     echo "  Manifests Dir: ${MANIFESTS_DIR}"
     echo ""
@@ -511,7 +520,7 @@ main() {
     echo ""
     log_info "Done!"
     echo ""
-    echo "The dashboard image has been updated to: ${DASHBOARD_IMAGE_REPO}:${DASHBOARD_IMAGE_TAG}"
+    echo "The dashboard image has been updated to: ${DASHBOARD_IMAGE}"
     echo ""
     echo "You can verify the running image with:"
     echo "  oc get deploy odh-dashboard -n ${DASHBOARD_NAMESPACE} -o=jsonpath='{.spec.template.spec.containers[0].image}'"
@@ -520,8 +529,9 @@ main() {
     echo "  $(basename "$0") --skip-setup <image-tag>"
     echo ""
     echo "Examples:"
-    echo "  $(basename "$0") --skip-setup main      # Latest main branch"
-    echo "  $(basename "$0") --skip-setup pr-5476   # Specific PR"
+    echo "  $(basename "$0") --skip-setup main              # Latest main branch"
+    echo "  $(basename "$0") --skip-setup pr-5476           # Specific PR"
+    echo "  $(basename "$0") --skip-setup sha256:abc123...  # Specific digest"
     echo ""
 }
 
