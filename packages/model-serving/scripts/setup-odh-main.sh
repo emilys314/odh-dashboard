@@ -31,7 +31,15 @@ DASHBOARD_IMAGE_TAG="${DASHBOARD_IMAGE_TAG:-main}"
 DASHBOARD_IMAGE_REPO="${DASHBOARD_IMAGE_REPO:-quay.io/opendatahub/odh-dashboard}"
 OPERATOR_NAMESPACE="${OPERATOR_NAMESPACE:-openshift-operators}"
 DASHBOARD_NAMESPACE="${DASHBOARD_NAMESPACE:-opendatahub}"
+DASHBOARD_DEPLOYMENT_NAME="${DASHBOARD_DEPLOYMENT_NAME:-odh-dashboard}"
+OPERATOR_NAME="${OPERATOR_NAME:-opendatahub-operator}"
 SKIP_SETUP="${SKIP_SETUP:-false}"
+
+# RHOAI namespace/operator values used when the ODH values are not available.
+FALLBACK_OPERATOR_NAMESPACE="redhat-ods-operator"
+FALLBACK_DASHBOARD_NAMESPACE="redhat-ods-applications"
+FALLBACK_DASHBOARD_DEPLOYMENT_NAME="rhods-dashboard"
+FALLBACK_OPERATOR_NAME="rhods-operator"
 
 # GitHub URLs for setup files
 CSV_PATCH_URL="https://raw.githubusercontent.com/opendatahub-io/opendatahub-operator/main/hack/component-dev/csv-patch.json"
@@ -39,6 +47,9 @@ PVC_URL="https://raw.githubusercontent.com/opendatahub-io/opendatahub-operator/m
 
 # Temporary directory for downloaded files
 TEMP_DIR="${SCRIPT_DIR}/.odh-setup-temp"
+PVC_NAME=""
+MANIFEST_VOLUME_NAME="dashboard-manifests"
+RHOAI_IMAGE_ENV_UPDATED="false"
 
 # Colors for output
 RED='\033[0;31m'
@@ -101,8 +112,15 @@ Arguments:
 Environment Variables:
     DASHBOARD_IMAGE_REPO    Image repository (default: quay.io/opendatahub/odh-dashboard)
     DASHBOARD_IMAGE_TAG     Image tag (default: main)
-    OPERATOR_NAMESPACE      Operator namespace (default: openshift-operators)
-    DASHBOARD_NAMESPACE     Dashboard namespace (default: opendatahub)
+    OPERATOR_NAMESPACE      Operator namespace (default: openshift-operators,
+                              falls back to redhat-ods-operator)
+    DASHBOARD_NAMESPACE     Dashboard namespace (default: opendatahub,
+                              falls back to redhat-ods-applications)
+    DASHBOARD_DEPLOYMENT_NAME
+                            Dashboard deployment (default: odh-dashboard,
+                              falls back to rhods-dashboard)
+    OPERATOR_NAME           Operator name (default: opendatahub-operator,
+                              falls back to rhods-operator)
     SKIP_SETUP              Skip PVC/CSV setup (default: false)
 
 Examples:
@@ -137,16 +155,114 @@ check_prerequisites() {
     log_info "Cluster: $(oc whoami --show-server)"
 }
 
+# Resolve the dashboard namespace and operator configuration for both ODH and
+# RHOAI installations. Environment variables remain the first candidates.
+resolve_cluster_configuration() {
+    log_info "Detecting dashboard and operator resources..."
+
+    if operator_deployment_exists "${OPERATOR_NAMESPACE}" "${OPERATOR_NAME}"; then
+        log_info "Found ${OPERATOR_NAME} in ${OPERATOR_NAMESPACE}."
+    elif operator_deployment_exists "${FALLBACK_OPERATOR_NAMESPACE}" "${FALLBACK_OPERATOR_NAME}"; then
+        log_warn "Could not find ${OPERATOR_NAME} in ${OPERATOR_NAMESPACE}."
+        OPERATOR_NAMESPACE="${FALLBACK_OPERATOR_NAMESPACE}"
+        OPERATOR_NAME="${FALLBACK_OPERATOR_NAME}"
+        log_info "Using ${OPERATOR_NAME} in ${OPERATOR_NAMESPACE}."
+    else
+        log_error "Could not find an operator deployment. Tried ${OPERATOR_NAME} in ${OPERATOR_NAMESPACE} and ${FALLBACK_OPERATOR_NAME} in ${FALLBACK_OPERATOR_NAMESPACE}."
+        exit 1
+    fi
+
+    if oc get deploy "${DASHBOARD_DEPLOYMENT_NAME}" -n "${DASHBOARD_NAMESPACE}" &> /dev/null; then
+        log_info "Found ${DASHBOARD_DEPLOYMENT_NAME} in ${DASHBOARD_NAMESPACE}."
+    elif [[ "${DASHBOARD_DEPLOYMENT_NAME}" != "${FALLBACK_DASHBOARD_DEPLOYMENT_NAME}" ]] && \
+        oc get deploy "${FALLBACK_DASHBOARD_DEPLOYMENT_NAME}" -n "${DASHBOARD_NAMESPACE}" &> /dev/null; then
+        log_warn "Could not find ${DASHBOARD_DEPLOYMENT_NAME} in ${DASHBOARD_NAMESPACE}."
+        DASHBOARD_DEPLOYMENT_NAME="${FALLBACK_DASHBOARD_DEPLOYMENT_NAME}"
+        log_info "Using ${DASHBOARD_DEPLOYMENT_NAME} in ${DASHBOARD_NAMESPACE}."
+    elif [[ "${DASHBOARD_NAMESPACE}" != "${FALLBACK_DASHBOARD_NAMESPACE}" ]] && \
+        oc get deploy "${FALLBACK_DASHBOARD_DEPLOYMENT_NAME}" -n "${FALLBACK_DASHBOARD_NAMESPACE}" &> /dev/null; then
+        log_warn "Could not find ${DASHBOARD_DEPLOYMENT_NAME} in ${DASHBOARD_NAMESPACE}."
+        DASHBOARD_NAMESPACE="${FALLBACK_DASHBOARD_NAMESPACE}"
+        DASHBOARD_DEPLOYMENT_NAME="${FALLBACK_DASHBOARD_DEPLOYMENT_NAME}"
+        log_info "Using ${DASHBOARD_DEPLOYMENT_NAME} in ${DASHBOARD_NAMESPACE}."
+    elif oc get namespace "${DASHBOARD_NAMESPACE}" &> /dev/null; then
+        log_info "Using ${DASHBOARD_DEPLOYMENT_NAME} in ${DASHBOARD_NAMESPACE} for the dashboard."
+    elif [[ "${DASHBOARD_NAMESPACE}" != "${FALLBACK_DASHBOARD_NAMESPACE}" ]] && \
+        oc get namespace "${FALLBACK_DASHBOARD_NAMESPACE}" &> /dev/null; then
+        log_warn "Could not find ${DASHBOARD_NAMESPACE}."
+        DASHBOARD_NAMESPACE="${FALLBACK_DASHBOARD_NAMESPACE}"
+        DASHBOARD_DEPLOYMENT_NAME="${FALLBACK_DASHBOARD_DEPLOYMENT_NAME}"
+        log_info "Using ${DASHBOARD_DEPLOYMENT_NAME} in ${DASHBOARD_NAMESPACE} for the dashboard."
+    else
+        log_error "Could not find a dashboard namespace. Tried ${DASHBOARD_NAMESPACE} and ${FALLBACK_DASHBOARD_NAMESPACE}."
+        exit 1
+    fi
+
+    log_info "Using dashboard namespace: ${DASHBOARD_NAMESPACE}"
+    log_info "Using dashboard deployment: ${DASHBOARD_DEPLOYMENT_NAME}"
+    log_info "Using operator: ${OPERATOR_NAME} in ${OPERATOR_NAMESPACE}"
+}
+
+# Check for an operator deployment by name first, then by the label used by
+# the existing setup commands.
+operator_deployment_exists() {
+    local namespace="$1"
+    local operator_name="$2"
+
+    oc get deploy "${operator_name}" -n "${namespace}" &> /dev/null || \
+        [[ -n "$(oc get deploy -n "${namespace}" -l "name=${operator_name}" --no-headers 2>/dev/null)" ]]
+}
+
+# Create a CSV patch for RHOAI without the fixed fsGroup used by the ODH
+# component-development patch. RHOAI operator namespaces use restricted-v2,
+# which only permits fsGroup values allocated to the namespace.
+create_rhoai_csv_patch() {
+    cat > "${TEMP_DIR}/csv-patch.json" <<EOF
+[
+  {
+    "op": "add",
+    "path": "/spec/install/spec/deployments/0/spec/replicas",
+    "value": 1
+  },
+  {
+    "op": "add",
+    "path": "/spec/install/spec/deployments/0/spec/strategy",
+    "value": { "type": "Recreate" }
+  },
+  {
+    "op": "add",
+    "path": "/spec/install/spec/deployments/0/spec/template/spec/containers/0/volumeMounts/-",
+    "value": {
+      "name": "${MANIFEST_VOLUME_NAME}",
+      "mountPath": "/opt/manifests/dashboard"
+    }
+  },
+  {
+    "op": "add",
+    "path": "/spec/install/spec/deployments/0/spec/template/spec/volumes/-",
+    "value": {
+      "name": "${MANIFEST_VOLUME_NAME}",
+      "persistentVolumeClaim": {
+        "claimName": "${PVC_NAME}"
+      }
+    }
+  }
+]
+EOF
+}
+
 # Download setup files from GitHub
 download_setup_files() {
     log_info "Downloading setup files from GitHub..."
 
     mkdir -p "${TEMP_DIR}"
 
-    log_info "Downloading csv-patch.json..."
-    if ! curl -sSL -o "${TEMP_DIR}/csv-patch.json" "${CSV_PATCH_URL}"; then
-        log_error "Failed to download csv-patch.json"
-        exit 1
+    if [[ "${OPERATOR_NAME}" != "${FALLBACK_OPERATOR_NAME}" ]]; then
+        log_info "Downloading csv-patch.json..."
+        if ! curl -sSL -o "${TEMP_DIR}/csv-patch.json" "${CSV_PATCH_URL}"; then
+            log_error "Failed to download csv-patch.json"
+            exit 1
+        fi
     fi
 
     log_info "Downloading pvc.yaml..."
@@ -155,15 +271,119 @@ download_setup_files() {
         exit 1
     fi
 
-    log_info "Setup files downloaded to ${TEMP_DIR}"
+    if [[ -z "${PVC_NAME}" ]]; then
+        PVC_NAME=$(awk '
+            /^metadata:/ { in_metadata=1; next }
+            in_metadata && /^  name:/ { print $2; exit }
+            /^[^ ]/ { in_metadata=0 }
+        ' "${TEMP_DIR}/pvc.yaml")
+    fi
+
+    if [[ -z "${PVC_NAME}" ]]; then
+        log_error "Could not determine the PVC name from ${TEMP_DIR}/pvc.yaml"
+        exit 1
+    fi
+
+    if [[ "${OPERATOR_NAME}" == "${FALLBACK_OPERATOR_NAME}" ]]; then
+        log_info "Creating RHOAI-compatible csv-patch.json for PVC ${PVC_NAME}..."
+        create_rhoai_csv_patch
+    fi
+
+    log_info "Setup files downloaded to ${TEMP_DIR} (PVC: ${PVC_NAME})"
+}
+
+# Remove the fixed fsGroup that may have been added to the RHOAI CSV by an
+# earlier run using the ODH component-development patch. Keep any other
+# securityContext fields supplied by the RHOAI operator bundle.
+remove_rhoai_fs_group() {
+    local csv="$1"
+    local fs_group
+    fs_group=$(oc get csv "${csv}" -n "${OPERATOR_NAMESPACE}" \
+        -o jsonpath='{.spec.install.spec.deployments[0].spec.template.spec.securityContext.fsGroup}' \
+        2>/dev/null || echo "")
+
+    if [[ "${fs_group}" != "1001" ]]; then
+        return 0
+    fi
+
+    log_warn "Removing incompatible fsGroup 1001 from RHOAI CSV ${csv}..."
+    oc patch csv "${csv}" -n "${OPERATOR_NAMESPACE}" --type json --patch \
+        '[{"op":"remove","path":"/spec/install/spec/deployments/0/spec/template/spec/securityContext/fsGroup"}]'
+}
+
+# Update the RHOAI related image used by the operator when rendering the
+# dashboard overlay. This value takes precedence over params.env in RHOAI
+# installations.
+ensure_rhoai_dashboard_image_env() {
+    local csv="$1"
+    local env_index=0
+    local env_name
+    local current_image
+
+    RHOAI_IMAGE_ENV_UPDATED="false"
+
+    while IFS= read -r env_name; do
+        if [[ "${env_name}" == "RELATED_IMAGE_ODH_DASHBOARD_IMAGE" ]]; then
+            break
+        fi
+        env_index=$((env_index + 1))
+    done < <(oc get csv "${csv}" -n "${OPERATOR_NAMESPACE}" \
+        -o jsonpath='{range .spec.install.spec.deployments[0].spec.template.spec.containers[0].env[*]}{.name}{"\n"}{end}')
+
+    if [[ "${env_name:-}" != "RELATED_IMAGE_ODH_DASHBOARD_IMAGE" ]]; then
+        log_error "Could not find RELATED_IMAGE_ODH_DASHBOARD_IMAGE in CSV ${csv}"
+        return 1
+    fi
+
+    current_image=$(oc get csv "${csv}" -n "${OPERATOR_NAMESPACE}" \
+        -o jsonpath="{.spec.install.spec.deployments[0].spec.template.spec.containers[0].env[${env_index}].value}")
+
+    if [[ "${current_image}" == "${DASHBOARD_IMAGE}" ]]; then
+        return 0
+    fi
+
+    log_info "Updating RHOAI dashboard related image to ${DASHBOARD_IMAGE}..."
+    if ! oc patch csv "${csv}" -n "${OPERATOR_NAMESPACE}" --type json --patch \
+        "[{\"op\":\"replace\",\"path\":\"/spec/install/spec/deployments/0/spec/template/spec/containers/0/env/${env_index}/value\",\"value\":\"${DASHBOARD_IMAGE}\"}]"; then
+        log_error "Failed to update the RHOAI dashboard related image in CSV ${csv}"
+        return 1
+    fi
+
+    RHOAI_IMAGE_ENV_UPDATED="true"
+}
+
+# Keep the RHOAI operator deployment settings from the upstream component-dev
+# patch when the manifest mount was added by an earlier script run.
+ensure_rhoai_csv_deployment_settings() {
+    local csv="$1"
+    local replicas
+    local strategy
+
+    replicas=$(oc get csv "${csv}" -n "${OPERATOR_NAMESPACE}" \
+        -o jsonpath='{.spec.install.spec.deployments[0].spec.replicas}' \
+        2>/dev/null || echo "")
+    strategy=$(oc get csv "${csv}" -n "${OPERATOR_NAMESPACE}" \
+        -o jsonpath='{.spec.install.spec.deployments[0].spec.strategy.type}' \
+        2>/dev/null || echo "")
+
+    if [[ "${replicas}" == "1" && "${strategy}" == "Recreate" ]]; then
+        return 0
+    fi
+
+    log_info "Configuring RHOAI operator deployment for a single replica with Recreate strategy..."
+    oc patch csv "${csv}" -n "${OPERATOR_NAMESPACE}" --type json --patch \
+        '[
+          {"op":"add","path":"/spec/install/spec/deployments/0/spec/replicas","value":1},
+          {"op":"add","path":"/spec/install/spec/deployments/0/spec/strategy","value":{"type":"Recreate"}}
+        ]'
 }
 
 # Apply PVC for manifest storage
 apply_pvc() {
     log_info "Checking if PVC already exists..."
 
-    if oc get pvc -n "${OPERATOR_NAMESPACE}" odh-manifests &> /dev/null; then
-        log_info "PVC 'odh-manifests' already exists. Skipping PVC creation."
+    if oc get pvc -n "${OPERATOR_NAMESPACE}" "${PVC_NAME}" &> /dev/null; then
+        log_info "PVC '${PVC_NAME}' already exists. Skipping PVC creation."
         return 0
     fi
 
@@ -173,31 +393,53 @@ apply_pvc() {
 }
 
 # Patch the CSV to enable manifest override
+find_operator_csv() {
+    oc get csv -n "${OPERATOR_NAMESPACE}" -o name | grep "${OPERATOR_NAME}" | head -n1 | cut -d/ -f2
+}
+
 patch_csv() {
-    log_info "Finding ODH operator CSV..."
+    log_info "Finding operator CSV..."
 
     local csv
-    csv=$(oc get csv -n "${OPERATOR_NAMESPACE}" -o name | grep opendatahub-operator | head -n1 | cut -d/ -f2)
+    csv=$(find_operator_csv)
 
     if [[ -z "$csv" ]]; then
-        log_error "Could not find opendatahub-operator CSV in ${OPERATOR_NAMESPACE}"
+        log_error "Could not find ${OPERATOR_NAME} CSV in ${OPERATOR_NAMESPACE}"
         exit 1
     fi
 
     log_info "Found CSV: ${csv}"
 
-    # Check if CSV is already patched by looking for the volume mount
+    if [[ "${OPERATOR_NAME}" == "${FALLBACK_OPERATOR_NAME}" ]]; then
+        if ! remove_rhoai_fs_group "${csv}"; then
+            log_error "Failed to remove the incompatible fsGroup from RHOAI CSV ${csv}"
+            exit 1
+        fi
+        if ! ensure_rhoai_dashboard_image_env "${csv}"; then
+            exit 1
+        fi
+    fi
+
+    # Check the mount path rather than the PVC name. RHOAI may already mount
+    # this path with a different volume/PVC name.
     local volume_mounts
     volume_mounts=$(oc get csv "${csv}" -n "${OPERATOR_NAMESPACE}" -o jsonpath='{.spec.install.spec.deployments[0].spec.template.spec.containers[0].volumeMounts}' 2>/dev/null || echo "")
 
-    if echo "${volume_mounts}" | grep -q "odh-manifests"; then
-        log_info "CSV already patched. Skipping CSV patch."
+    if echo "${volume_mounts}" | grep -qF "/opt/manifests/dashboard"; then
+        if [[ "${OPERATOR_NAME}" == "${FALLBACK_OPERATOR_NAME}" ]]; then
+            if ! ensure_rhoai_csv_deployment_settings "${csv}"; then
+                log_error "Failed to configure the RHOAI operator deployment settings"
+                exit 1
+            fi
+        fi
+        log_info "CSV already has the dashboard manifest mount. Skipping CSV patch."
         return 0
     fi
 
     log_info "Patching CSV ${csv}..."
     if ! oc patch csv "${csv}" -n "${OPERATOR_NAMESPACE}" --type json --patch-file "${TEMP_DIR}/csv-patch.json"; then
-        log_warn "CSV patch may have already been applied or failed. Continuing..."
+        log_error "Failed to patch CSV ${csv}"
+        exit 1
     else
         log_info "CSV patched successfully."
     fi
@@ -216,7 +458,7 @@ wait_for_operator_pod() {
     while [[ $attempt -lt $max_attempts ]]; do
         # Get pod count first
         local pod_count
-        pod_count=$(oc get pod -n "${OPERATOR_NAMESPACE}" -l name=opendatahub-operator --no-headers 2>/dev/null | wc -l || echo "0")
+        pod_count=$(oc get pod -n "${OPERATOR_NAMESPACE}" -l "name=${OPERATOR_NAME}" --no-headers 2>/dev/null | wc -l || echo "0")
 
         if [[ "$pod_count" -eq 0 ]]; then
             log_info "No operator pod found yet, waiting for new pod to be created... (attempt $((attempt + 1))/$max_attempts)"
@@ -227,7 +469,7 @@ wait_for_operator_pod() {
 
         # Check if any pod is in Terminating state
         local terminating
-        terminating=$(oc get pod -n "${OPERATOR_NAMESPACE}" -l name=opendatahub-operator -o jsonpath='{.items[*].metadata.deletionTimestamp}' 2>/dev/null || echo "")
+        terminating=$(oc get pod -n "${OPERATOR_NAMESPACE}" -l "name=${OPERATOR_NAME}" -o jsonpath='{.items[*].metadata.deletionTimestamp}' 2>/dev/null || echo "")
 
         if [[ -n "$terminating" ]]; then
             log_info "Operator pod is terminating, waiting... (attempt $((attempt + 1))/$max_attempts)"
@@ -238,12 +480,12 @@ wait_for_operator_pod() {
 
         # Get the pod status
         local pod_status
-        pod_status=$(oc get pod -n "${OPERATOR_NAMESPACE}" -l name=opendatahub-operator -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "")
+        pod_status=$(oc get pod -n "${OPERATOR_NAMESPACE}" -l "name=${OPERATOR_NAME}" -o jsonpath='{.items[0].status.phase}' 2>/dev/null || echo "")
 
         if [[ "$pod_status" == "Running" ]]; then
             # Also check if pod is ready
             local ready
-            ready=$(oc get pod -n "${OPERATOR_NAMESPACE}" -l name=opendatahub-operator -o jsonpath='{.items[0].status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "")
+            ready=$(oc get pod -n "${OPERATOR_NAMESPACE}" -l "name=${OPERATOR_NAME}" -o jsonpath='{.items[0].status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "")
             if [[ "$ready" == "True" ]]; then
                 log_info "Operator pod is ready."
                 return 0
@@ -322,14 +564,30 @@ update_deployment_manifest() {
 # Get the operator pod name
 get_operator_pod() {
     local pod
-    pod=$(oc get pod -n "${OPERATOR_NAMESPACE}" -l name=opendatahub-operator -o jsonpath="{.items[0].metadata.name}" 2>/dev/null || echo "")
+    pod=$(oc get pod -n "${OPERATOR_NAMESPACE}" -l "name=${OPERATOR_NAME}" -o jsonpath="{.items[0].metadata.name}" 2>/dev/null || echo "")
 
     if [[ -z "$pod" ]]; then
-        log_error "Could not find opendatahub-operator pod in ${OPERATOR_NAMESPACE}"
+        log_error "Could not find ${OPERATOR_NAME} pod in ${OPERATOR_NAMESPACE}"
         exit 1
     fi
 
     echo "$pod"
+}
+
+# Get the container receiving the manifest volume. The CSV patch targets the
+# first operator container, but its name differs between ODH and RHOAI.
+get_operator_container() {
+    local pod="$1"
+    local container
+    container=$(oc get pod "${pod}" -n "${OPERATOR_NAMESPACE}" \
+        -o jsonpath="{.spec.containers[0].name}" 2>/dev/null || echo "")
+
+    if [[ -z "${container}" ]]; then
+        log_error "Could not determine the operator container in pod ${pod}"
+        exit 1
+    fi
+
+    echo "${container}"
 }
 
 # Copy manifests to the operator pod
@@ -339,6 +597,10 @@ copy_manifests_to_pod() {
     local op_pod
     op_pod=$(get_operator_pod)
     log_info "Using pod: ${op_pod}"
+
+    local op_container
+    op_container=$(get_operator_container "${op_pod}")
+    log_info "Using container: ${op_container}"
 
     # Wait for pod to be ready
     log_info "Waiting for operator pod to be ready..."
@@ -351,7 +613,7 @@ copy_manifests_to_pod() {
     log_info "Copying manifests to pod..."
     local temp_manifests="${TEMP_DIR}/manifests"
 
-    if ! oc cp "${temp_manifests}/." "${OPERATOR_NAMESPACE}/${op_pod}:/opt/manifests/dashboard" -c manager; then
+    if ! oc cp "${temp_manifests}/." "${OPERATOR_NAMESPACE}/${op_pod}:/opt/manifests/dashboard" -c "${op_container}"; then
         log_error "Failed to copy manifests to operator pod"
         exit 1
     fi
@@ -363,10 +625,10 @@ copy_manifests_to_pod() {
 restart_operator() {
     log_info "Restarting operator deployment..."
 
-    oc rollout restart deploy -n "${OPERATOR_NAMESPACE}" -l name=opendatahub-operator
+    oc rollout restart deploy -n "${OPERATOR_NAMESPACE}" -l "name=${OPERATOR_NAME}"
 
     log_info "Waiting for operator rollout to complete..."
-    if ! oc rollout status deploy -n "${OPERATOR_NAMESPACE}" -l name=opendatahub-operator --timeout=120s; then
+    if ! oc rollout status deploy -n "${OPERATOR_NAMESPACE}" -l "name=${OPERATOR_NAME}" --timeout=120s; then
         log_warn "Operator rollout may still be in progress"
     fi
 
@@ -383,7 +645,7 @@ wait_for_dashboard() {
 
     while [[ $attempt -lt $max_attempts ]]; do
         # Check if dashboard deployment exists
-        if ! oc get deploy odh-dashboard -n "${DASHBOARD_NAMESPACE}" &> /dev/null; then
+        if ! oc get deploy "${DASHBOARD_DEPLOYMENT_NAME}" -n "${DASHBOARD_NAMESPACE}" &> /dev/null; then
             log_info "Dashboard deployment not found yet... (attempt $((attempt + 1))/$max_attempts)"
             sleep 5
             attempt=$((attempt + 1))
@@ -392,14 +654,14 @@ wait_for_dashboard() {
 
         # Get current image
         local current_image
-        current_image=$(oc get deploy odh-dashboard -n "${DASHBOARD_NAMESPACE}" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "")
+        current_image=$(oc get deploy "${DASHBOARD_DEPLOYMENT_NAME}" -n "${DASHBOARD_NAMESPACE}" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "")
 
         if [[ "$current_image" == "$expected_image" ]]; then
             log_info "Dashboard image updated to: ${current_image}"
 
             # Wait for deployment to be available
             log_info "Waiting for dashboard pods to be ready..."
-            if oc rollout status deploy/odh-dashboard -n "${DASHBOARD_NAMESPACE}" --timeout=300s; then
+            if oc rollout status "deploy/${DASHBOARD_DEPLOYMENT_NAME}" -n "${DASHBOARD_NAMESPACE}" --timeout=300s; then
                 log_info "Dashboard deployment is ready."
                 return 0
             fi
@@ -428,13 +690,13 @@ verify_installation() {
     echo ""
     echo "Dashboard Deployment:"
     echo "---------------------"
-    if oc get deploy odh-dashboard -n "${DASHBOARD_NAMESPACE}" &> /dev/null; then
+    if oc get deploy "${DASHBOARD_DEPLOYMENT_NAME}" -n "${DASHBOARD_NAMESPACE}" &> /dev/null; then
         local current_image
-        current_image=$(oc get deploy odh-dashboard -n "${DASHBOARD_NAMESPACE}" -o jsonpath='{.spec.template.spec.containers[0].image}')
+        current_image=$(oc get deploy "${DASHBOARD_DEPLOYMENT_NAME}" -n "${DASHBOARD_NAMESPACE}" -o jsonpath='{.spec.template.spec.containers[0].image}')
         echo "  Image: ${current_image}"
 
         local replicas
-        replicas=$(oc get deploy odh-dashboard -n "${DASHBOARD_NAMESPACE}" -o jsonpath='{.status.readyReplicas}')
+        replicas=$(oc get deploy "${DASHBOARD_DEPLOYMENT_NAME}" -n "${DASHBOARD_NAMESPACE}" -o jsonpath='{.status.readyReplicas}')
         echo "  Ready Replicas: ${replicas:-0}"
     else
         echo "  Dashboard deployment not found"
@@ -469,7 +731,7 @@ main() {
     if [[ "${DASHBOARD_IMAGE_TAG}" == sha256:* ]]; then
         DASHBOARD_IMAGE="${DASHBOARD_IMAGE_REPO}@${DASHBOARD_IMAGE_TAG}"
     else
-        DASHBOARD_IMAGE="${DASHBOARD_IMAGE}"
+        DASHBOARD_IMAGE="${DASHBOARD_IMAGE_REPO}:${DASHBOARD_IMAGE_TAG}"
     fi
 
     echo "=============================================="
@@ -483,6 +745,7 @@ main() {
     echo ""
 
     check_prerequisites
+    resolve_cluster_configuration
 
     # Create temp directory
     mkdir -p "${TEMP_DIR}"
@@ -496,6 +759,22 @@ main() {
         perform_one_time_setup
     else
         log_info "Skipping one-time setup (--skip-setup flag provided)"
+    fi
+
+    if [[ "${SKIP_SETUP}" == "true" && "${OPERATOR_NAME}" == "${FALLBACK_OPERATOR_NAME}" ]]; then
+        log_info "Checking the RHOAI dashboard related image override..."
+        local csv
+        csv=$(find_operator_csv)
+        if [[ -z "${csv}" ]]; then
+            log_error "Could not find ${OPERATOR_NAME} CSV in ${OPERATOR_NAMESPACE}"
+            exit 1
+        fi
+        if ! ensure_rhoai_dashboard_image_env "${csv}"; then
+            exit 1
+        fi
+        if [[ "${RHOAI_IMAGE_ENV_UPDATED}" == "true" ]]; then
+            wait_for_operator_pod 60
+        fi
     fi
 
     echo ""
@@ -523,7 +802,7 @@ main() {
     echo "The dashboard image has been updated to: ${DASHBOARD_IMAGE}"
     echo ""
     echo "You can verify the running image with:"
-    echo "  oc get deploy odh-dashboard -n ${DASHBOARD_NAMESPACE} -o=jsonpath='{.spec.template.spec.containers[0].image}'"
+    echo "  oc get deploy ${DASHBOARD_DEPLOYMENT_NAME} -n ${DASHBOARD_NAMESPACE} -o=jsonpath='{.spec.template.spec.containers[0].image}'"
     echo ""
     echo "To use a different image in the future, run:"
     echo "  $(basename "$0") --skip-setup <image-tag>"
@@ -537,4 +816,3 @@ main() {
 
 # Run main function
 main "$@"
-
