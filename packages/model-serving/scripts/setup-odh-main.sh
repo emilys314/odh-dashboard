@@ -6,7 +6,7 @@ set -euo pipefail
 #
 # This script:
 # 1. Sets up the PVC and CSV patch (one-time setup, skipped if already done)
-# 2. Updates the deployment.yaml manifest with the desired image
+# 2. Updates the distribution image parameter with the desired image
 # 3. Copies the manifests to the operator pod
 # 4. Restarts the operator to apply the new image
 #
@@ -522,16 +522,21 @@ perform_one_time_setup() {
     log_info "One-time setup complete."
 }
 
-# Update the deployment.yaml with the new image
+# Update the distribution params with the new dashboard image
 update_deployment_manifest() {
     local image="${DASHBOARD_IMAGE}"
+    local manifest_distribution="odh"
 
-    log_info "Updating deployment.yaml with image: ${image}"
+    if [[ "${OPERATOR_NAME}" == "${FALLBACK_OPERATOR_NAME}" ]]; then
+        manifest_distribution="rhoai"
+    fi
 
-    local deployment_file="${MANIFESTS_DIR}/core-bases/base/deployment.yaml"
+    log_info "Updating ${manifest_distribution}/params.env with image: ${image}"
 
-    if [[ ! -f "${deployment_file}" ]]; then
-        log_error "Deployment file not found: ${deployment_file}"
+    local params_file="${MANIFESTS_DIR}/${manifest_distribution}/params.env"
+
+    if [[ ! -f "${params_file}" ]]; then
+        log_error "Manifest parameters file not found: ${params_file}"
         exit 1
     fi
 
@@ -540,25 +545,19 @@ update_deployment_manifest() {
     rm -rf "${temp_manifests}"
     cp -r "${MANIFESTS_DIR}" "${temp_manifests}"
 
-    # Update the image in the temporary copy
-    local temp_deployment="${temp_manifests}/core-bases/base/deployment.yaml"
-
-    # Replace the image placeholder with the actual image
-    # The deployment.yaml uses $(odh-dashboard-image) as a placeholder
-    # Note: Using -i.bak with rm for cross-platform compatibility (BSD/GNU sed)
-    if grep -q '$(odh-dashboard-image)' "${temp_deployment}"; then
-        sed -i.bak "s|\$(odh-dashboard-image)|${image}|g" "${temp_deployment}" && rm -f "${temp_deployment}.bak"
-        log_info "Replaced \$(odh-dashboard-image) with ${image}"
-    elif grep -q 'image:.*quay.io/opendatahub/odh-dashboard' "${temp_deployment}"; then
-        # If there's already a concrete image (tag or digest), replace it
-        sed -i.bak "s|image:.*quay.io/opendatahub/odh-dashboard[@:][^[:space:]]*|image: ${image}|g" "${temp_deployment}" && rm -f "${temp_deployment}.bak"
-        log_info "Updated existing dashboard image to ${image}"
-    else
-        log_warn "Could not find image placeholder or existing image in deployment.yaml"
-        log_warn "Manual intervention may be required"
+    # Kustomize replaces this parameter into base/deployment.yaml and the
+    # distribution-specific overlays. Note: Using -i.bak with rm for
+    # cross-platform compatibility (BSD/GNU sed).
+    local temp_params="${temp_manifests}/${manifest_distribution}/params.env"
+    if ! grep -q '^odh-dashboard-image=' "${temp_params}"; then
+        log_error "Could not find odh-dashboard-image in ${temp_params}"
+        exit 1
     fi
 
-    log_info "Deployment manifest updated."
+    sed -i.bak "s|^odh-dashboard-image=.*|odh-dashboard-image=${image}|" "${temp_params}" && rm -f "${temp_params}.bak"
+    log_info "Updated ${manifest_distribution}/params.env with ${image}"
+
+    log_info "Manifest parameters updated."
 }
 
 # Get the operator pod name
@@ -778,7 +777,7 @@ main() {
     fi
 
     echo ""
-    log_step "Step 2/4: Updating deployment manifest..."
+    log_step "Step 2/4: Updating dashboard image in manifests..."
     update_deployment_manifest
 
     echo ""
