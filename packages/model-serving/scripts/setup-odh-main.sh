@@ -4,15 +4,13 @@ set -euo pipefail
 # =============================================================================
 # Setup script for updating ODH Dashboard to use the main image
 #
-# This script:
-# 1. Sets up the PVC and CSV patch (one-time setup, skipped if already done)
-# 2. Updates the distribution image parameter with the desired image
-# 3. Copies the manifests to the operator pod
-# 4. Restarts the operator to apply the new image
+# This script updates the dashboard module operator's image override when that
+# operator is installed. On older installations, it patches the main operator
+# CSV/PVC, copies updated manifests, and restarts the main operator.
 #
 # Prerequisites:
 # - oc CLI logged into your OpenShift cluster with cluster-admin privileges
-# - curl for downloading files from GitHub
+# - curl for downloading the PVC manifest on older installations
 #
 # Usage:
 #   ./setup-odh-main.sh                    # Uses main image
@@ -32,6 +30,7 @@ DASHBOARD_IMAGE_REPO="${DASHBOARD_IMAGE_REPO:-quay.io/opendatahub/odh-dashboard}
 OPERATOR_NAMESPACE="${OPERATOR_NAMESPACE:-openshift-operators}"
 DASHBOARD_NAMESPACE="${DASHBOARD_NAMESPACE:-opendatahub}"
 DASHBOARD_DEPLOYMENT_NAME="${DASHBOARD_DEPLOYMENT_NAME:-odh-dashboard}"
+DASHBOARD_OPERATOR_DEPLOYMENT_NAME="${DASHBOARD_OPERATOR_DEPLOYMENT_NAME:-dashboard-operator}"
 OPERATOR_NAME="${OPERATOR_NAME:-opendatahub-operator}"
 SKIP_SETUP="${SKIP_SETUP:-false}"
 
@@ -41,15 +40,13 @@ FALLBACK_DASHBOARD_NAMESPACE="redhat-ods-applications"
 FALLBACK_DASHBOARD_DEPLOYMENT_NAME="rhods-dashboard"
 FALLBACK_OPERATOR_NAME="rhods-operator"
 
-# GitHub URLs for setup files
-CSV_PATCH_URL="https://raw.githubusercontent.com/opendatahub-io/opendatahub-operator/main/hack/component-dev/csv-patch.json"
+# GitHub URL for the PVC manifest
 PVC_URL="https://raw.githubusercontent.com/opendatahub-io/opendatahub-operator/main/hack/component-dev/pvc.yaml"
 
 # Temporary directory for downloaded files
 TEMP_DIR="${SCRIPT_DIR}/.odh-setup-temp"
 PVC_NAME=""
 MANIFEST_VOLUME_NAME="dashboard-manifests"
-RHOAI_IMAGE_ENV_UPDATED="false"
 
 # Colors for output
 RED='\033[0;31m'
@@ -119,6 +116,8 @@ Environment Variables:
     DASHBOARD_DEPLOYMENT_NAME
                             Dashboard deployment (default: odh-dashboard,
                               falls back to rhods-dashboard)
+    DASHBOARD_OPERATOR_DEPLOYMENT_NAME
+                            Dashboard module operator deployment (default: dashboard-operator)
     OPERATOR_NAME           Operator name (default: opendatahub-operator,
                               falls back to rhods-operator)
     SKIP_SETUP              Skip PVC/CSV setup (default: false)
@@ -140,18 +139,14 @@ check_prerequisites() {
         exit 1
     fi
 
-    if ! oc whoami &> /dev/null; then
-        log_error "Not logged into OpenShift cluster. Please run 'oc login' first."
-        exit 1
-    fi
-
-    if ! command -v curl &> /dev/null; then
-        log_error "curl is required but not installed. Aborting."
+    local current_user
+    if ! current_user=$(oc whoami 2>&1); then
+        log_error "Cannot access OpenShift cluster: ${current_user}"
         exit 1
     fi
 
     log_info "Prerequisites check passed."
-    log_info "Logged in as: $(oc whoami)"
+    log_info "Logged in as: ${current_user}"
     log_info "Cluster: $(oc whoami --show-server)"
 }
 
@@ -213,10 +208,9 @@ operator_deployment_exists() {
         [[ -n "$(oc get deploy -n "${namespace}" -l "name=${operator_name}" --no-headers 2>/dev/null)" ]]
 }
 
-# Create a CSV patch for RHOAI without the fixed fsGroup used by the ODH
-# component-development patch. RHOAI operator namespaces use restricted-v2,
-# which only permits fsGroup values allocated to the namespace.
-create_rhoai_csv_patch() {
+# Create a CSV patch without a fixed fsGroup. Namespace SCCs may reject
+# fsGroup 1001 from the upstream component-development patch.
+create_dashboard_csv_patch() {
     cat > "${TEMP_DIR}/csv-patch.json" <<EOF
 [
   {
@@ -251,19 +245,16 @@ create_rhoai_csv_patch() {
 EOF
 }
 
-# Download setup files from GitHub
+# Download the PVC manifest and create a CSV patch for this installation
 download_setup_files() {
     log_info "Downloading setup files from GitHub..."
 
-    mkdir -p "${TEMP_DIR}"
-
-    if [[ "${OPERATOR_NAME}" != "${FALLBACK_OPERATOR_NAME}" ]]; then
-        log_info "Downloading csv-patch.json..."
-        if ! curl -sSL -o "${TEMP_DIR}/csv-patch.json" "${CSV_PATCH_URL}"; then
-            log_error "Failed to download csv-patch.json"
-            exit 1
-        fi
+    if ! command -v curl &> /dev/null; then
+        log_error "curl is required for the one-time PVC setup but is not installed."
+        exit 1
     fi
+
+    mkdir -p "${TEMP_DIR}"
 
     log_info "Downloading pvc.yaml..."
     if ! curl -sSL -o "${TEMP_DIR}/pvc.yaml" "${PVC_URL}"; then
@@ -284,18 +275,15 @@ download_setup_files() {
         exit 1
     fi
 
-    if [[ "${OPERATOR_NAME}" == "${FALLBACK_OPERATOR_NAME}" ]]; then
-        log_info "Creating RHOAI-compatible csv-patch.json for PVC ${PVC_NAME}..."
-        create_rhoai_csv_patch
-    fi
+    log_info "Creating csv-patch.json for PVC ${PVC_NAME} without a fixed fsGroup..."
+    create_dashboard_csv_patch
 
     log_info "Setup files downloaded to ${TEMP_DIR} (PVC: ${PVC_NAME})"
 }
 
-# Remove the fixed fsGroup that may have been added to the RHOAI CSV by an
-# earlier run using the ODH component-development patch. Keep any other
-# securityContext fields supplied by the RHOAI operator bundle.
-remove_rhoai_fs_group() {
+# Repair a CSV patched by an earlier run with the upstream fsGroup 1001.
+# Keep any other securityContext fields supplied by the operator bundle.
+remove_incompatible_fs_group() {
     local csv="$1"
     local fs_group
     fs_group=$(oc get csv "${csv}" -n "${OPERATOR_NAMESPACE}" \
@@ -306,21 +294,47 @@ remove_rhoai_fs_group() {
         return 0
     fi
 
-    log_warn "Removing incompatible fsGroup 1001 from RHOAI CSV ${csv}..."
+    log_warn "Removing incompatible fsGroup 1001 from CSV ${csv}..."
     oc patch csv "${csv}" -n "${OPERATOR_NAMESPACE}" --type json --patch \
         '[{"op":"remove","path":"/spec/install/spec/deployments/0/spec/template/spec/securityContext/fsGroup"}]'
 }
 
-# Update the RHOAI related image used by the operator when rendering the
-# dashboard overlay. This value takes precedence over params.env in RHOAI
-# installations.
-ensure_rhoai_dashboard_image_env() {
+# OLM may not have propagated the CSV repair yet. Repair the deployment too
+# so the operator pod can be created immediately.
+remove_incompatible_deployment_fs_group() {
+    local deployment
+    deployment=$(oc get deploy "${OPERATOR_NAME}" -n "${OPERATOR_NAMESPACE}" \
+        -o jsonpath='{.metadata.name}' 2>/dev/null || true)
+    if [[ -z "${deployment}" ]]; then
+        deployment=$(oc get deploy -n "${OPERATOR_NAMESPACE}" -l "name=${OPERATOR_NAME}" \
+            -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+    fi
+
+    if [[ -z "${deployment}" ]]; then
+        log_error "Could not find the ${OPERATOR_NAME} deployment in ${OPERATOR_NAMESPACE}"
+        return 1
+    fi
+
+    local fs_group
+    fs_group=$(oc get deploy "${deployment}" -n "${OPERATOR_NAMESPACE}" \
+        -o jsonpath='{.spec.template.spec.securityContext.fsGroup}' 2>/dev/null || echo "")
+
+    if [[ "${fs_group}" != "1001" ]]; then
+        return 0
+    fi
+
+    log_warn "Removing incompatible fsGroup 1001 from deployment ${deployment}..."
+    oc patch deploy "${deployment}" -n "${OPERATOR_NAMESPACE}" --type json --patch \
+        '[{"op":"remove","path":"/spec/template/spec/securityContext/fsGroup"}]'
+}
+
+# Update the related image used by the operator when rendering the dashboard.
+# This value takes precedence over params.env in both ODH and RHOAI.
+ensure_dashboard_image_env() {
     local csv="$1"
     local env_index=0
     local env_name
     local current_image
-
-    RHOAI_IMAGE_ENV_UPDATED="false"
 
     while IFS= read -r env_name; do
         if [[ "${env_name}" == "RELATED_IMAGE_ODH_DASHBOARD_IMAGE" ]]; then
@@ -331,8 +345,12 @@ ensure_rhoai_dashboard_image_env() {
         -o jsonpath='{range .spec.install.spec.deployments[0].spec.template.spec.containers[0].env[*]}{.name}{"\n"}{end}')
 
     if [[ "${env_name:-}" != "RELATED_IMAGE_ODH_DASHBOARD_IMAGE" ]]; then
-        log_error "Could not find RELATED_IMAGE_ODH_DASHBOARD_IMAGE in CSV ${csv}"
-        return 1
+        if [[ "${OPERATOR_NAME}" == "${FALLBACK_OPERATOR_NAME}" ]]; then
+            log_error "Could not find RELATED_IMAGE_ODH_DASHBOARD_IMAGE in CSV ${csv}"
+            return 1
+        fi
+        log_info "CSV ${csv} has no dashboard related image override; using params.env."
+        return 0
     fi
 
     current_image=$(oc get csv "${csv}" -n "${OPERATOR_NAMESPACE}" \
@@ -342,14 +360,12 @@ ensure_rhoai_dashboard_image_env() {
         return 0
     fi
 
-    log_info "Updating RHOAI dashboard related image to ${DASHBOARD_IMAGE}..."
+    log_info "Updating dashboard related image to ${DASHBOARD_IMAGE}..."
     if ! oc patch csv "${csv}" -n "${OPERATOR_NAMESPACE}" --type json --patch \
         "[{\"op\":\"replace\",\"path\":\"/spec/install/spec/deployments/0/spec/template/spec/containers/0/env/${env_index}/value\",\"value\":\"${DASHBOARD_IMAGE}\"}]"; then
-        log_error "Failed to update the RHOAI dashboard related image in CSV ${csv}"
+        log_error "Failed to update the dashboard related image in CSV ${csv}"
         return 1
     fi
-
-    RHOAI_IMAGE_ENV_UPDATED="true"
 }
 
 # Keep the RHOAI operator deployment settings from the upstream component-dev
@@ -410,14 +426,16 @@ patch_csv() {
 
     log_info "Found CSV: ${csv}"
 
-    if [[ "${OPERATOR_NAME}" == "${FALLBACK_OPERATOR_NAME}" ]]; then
-        if ! remove_rhoai_fs_group "${csv}"; then
-            log_error "Failed to remove the incompatible fsGroup from RHOAI CSV ${csv}"
-            exit 1
-        fi
-        if ! ensure_rhoai_dashboard_image_env "${csv}"; then
-            exit 1
-        fi
+    if ! remove_incompatible_fs_group "${csv}"; then
+        log_error "Failed to remove the incompatible fsGroup from CSV ${csv}"
+        exit 1
+    fi
+    if ! remove_incompatible_deployment_fs_group; then
+        exit 1
+    fi
+
+    if ! ensure_dashboard_image_env "${csv}"; then
+        exit 1
     fi
 
     # Check the mount path rather than the PVC name. RHOAI may already mount
@@ -504,8 +522,10 @@ wait_for_operator_pod() {
         attempt=$((attempt + 1))
     done
 
-    log_warn "Operator pod did not become ready in time, but continuing anyway..."
-    return 0
+    log_error "Operator pod did not become ready in ${OPERATOR_NAMESPACE}."
+    oc get deploy -n "${OPERATOR_NAMESPACE}" -l "name=${OPERATOR_NAME}" || true
+    oc get pods -n "${OPERATOR_NAMESPACE}" -o wide || true
+    return 1
 }
 
 # Perform one-time setup (PVC and CSV patch)
@@ -673,8 +693,29 @@ wait_for_dashboard() {
         attempt=$((attempt + 1))
     done
 
-    log_warn "Dashboard may still be updating. Check status manually."
-    return 0
+    log_error "Dashboard image did not update to ${expected_image} in time."
+    return 1
+}
+
+# Newer installations run a separate dashboard module operator. Its image
+# override controls the dashboard deployment, so no CSV/PVC patch is needed.
+update_dashboard_module_operator() {
+    log_step "Updating ${DASHBOARD_OPERATOR_DEPLOYMENT_NAME} image override..."
+    oc set env "deploy/${DASHBOARD_OPERATOR_DEPLOYMENT_NAME}" -n "${DASHBOARD_NAMESPACE}" \
+        "RELATED_IMAGE_ODH_DASHBOARD_IMAGE=${DASHBOARD_IMAGE}"
+
+    log_info "Waiting for the dashboard module operator to be ready..."
+    if ! oc rollout status "deploy/${DASHBOARD_OPERATOR_DEPLOYMENT_NAME}" \
+        -n "${DASHBOARD_NAMESPACE}" --timeout=180s; then
+        log_error "Dashboard module operator did not become ready."
+        oc get pods -n "${DASHBOARD_NAMESPACE}" \
+            -l "app.kubernetes.io/instance=${DASHBOARD_OPERATOR_DEPLOYMENT_NAME}" || true
+        return 1
+    fi
+
+    wait_for_dashboard
+    verify_installation
+    log_info "Done!"
 }
 
 # Verify the installation
@@ -746,6 +787,12 @@ main() {
     check_prerequisites
     resolve_cluster_configuration
 
+    if oc get deploy "${DASHBOARD_OPERATOR_DEPLOYMENT_NAME}" \
+        -n "${DASHBOARD_NAMESPACE}" &> /dev/null; then
+        update_dashboard_module_operator
+        return
+    fi
+
     # Create temp directory
     mkdir -p "${TEMP_DIR}"
 
@@ -760,20 +807,25 @@ main() {
         log_info "Skipping one-time setup (--skip-setup flag provided)"
     fi
 
-    if [[ "${SKIP_SETUP}" == "true" && "${OPERATOR_NAME}" == "${FALLBACK_OPERATOR_NAME}" ]]; then
-        log_info "Checking the RHOAI dashboard related image override..."
+    if [[ "${SKIP_SETUP}" == "true" ]]; then
+        log_info "Checking the dashboard related image override..."
         local csv
         csv=$(find_operator_csv)
         if [[ -z "${csv}" ]]; then
             log_error "Could not find ${OPERATOR_NAME} CSV in ${OPERATOR_NAMESPACE}"
             exit 1
         fi
-        if ! ensure_rhoai_dashboard_image_env "${csv}"; then
+        if ! remove_incompatible_fs_group "${csv}"; then
+            log_error "Failed to remove the incompatible fsGroup from CSV ${csv}"
             exit 1
         fi
-        if [[ "${RHOAI_IMAGE_ENV_UPDATED}" == "true" ]]; then
-            wait_for_operator_pod 60
+        if ! remove_incompatible_deployment_fs_group; then
+            exit 1
         fi
+        if ! ensure_dashboard_image_env "${csv}"; then
+            exit 1
+        fi
+        wait_for_operator_pod 60
     fi
 
     echo ""
