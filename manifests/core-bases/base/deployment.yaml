@@ -27,7 +27,7 @@ spec:
       serviceAccount: odh-dashboard
       containers:
         - name: odh-dashboard
-          image: quay.io/opendatahub/odh-dashboard:pr-5048
+          image: quay.io/rh-ee-esamoylo/odh-dashboard:rhoaieng-93068-2528d1046
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
