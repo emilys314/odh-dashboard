@@ -4,9 +4,10 @@ set -euo pipefail
 # =============================================================================
 # Setup script for updating ODH Dashboard to use the main image
 #
-# This script updates the dashboard module operator's image override when that
-# operator is installed. On older installations, it patches the main operator
-# CSV/PVC, copies updated manifests, and restarts the main operator.
+# When the dashboard module operator is installed, this script updates the
+# related image on its parent ODH operator and then on the module operator.
+# On older installations, it patches the main operator CSV/PVC, copies updated
+# manifests, and restarts the main operator.
 #
 # Prerequisites:
 # - oc CLI logged into your OpenShift cluster with cluster-admin privileges
@@ -17,7 +18,7 @@ set -euo pipefail
 #   ./setup-odh-main.sh pr-5476            # Uses a specific PR image
 #   ./setup-odh-main.sh v2.38.2-odh        # Uses a specific version
 #   ./setup-odh-main.sh sha256:abc123...   # Uses a specific image digest
-#   ./setup-odh-main.sh --skip-setup       # Skip PVC/CSV setup (if already done)
+#   ./setup-odh-main.sh --skip-setup       # Skip legacy PVC/CSV manifest mount setup
 #   ./setup-odh-main.sh --skip-setup main  # Skip setup and use main image
 # =============================================================================
 
@@ -99,7 +100,7 @@ Usage: $(basename "$0") [OPTIONS] [IMAGE_TAG]
 Update ODH Dashboard to use a specific image tag.
 
 Options:
-    --skip-setup    Skip the one-time PVC and CSV patch setup
+    --skip-setup    Skip the one-time PVC and CSV manifest mount setup
     --help, -h      Show this help message
 
 Arguments:
@@ -208,6 +209,16 @@ operator_deployment_exists() {
         [[ -n "$(oc get deploy -n "${namespace}" -l "name=${operator_name}" --no-headers 2>/dev/null)" ]]
 }
 
+find_operator_deployment() {
+    if oc get deploy "${OPERATOR_NAME}" -n "${OPERATOR_NAMESPACE}" &> /dev/null; then
+        echo "${OPERATOR_NAME}"
+        return 0
+    fi
+
+    oc get deploy -n "${OPERATOR_NAMESPACE}" -l "name=${OPERATOR_NAME}" \
+        -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true
+}
+
 # Create a CSV patch without a fixed fsGroup. Namespace SCCs may reject
 # fsGroup 1001 from the upstream component-development patch.
 create_dashboard_csv_patch() {
@@ -303,12 +314,7 @@ remove_incompatible_fs_group() {
 # so the operator pod can be created immediately.
 remove_incompatible_deployment_fs_group() {
     local deployment
-    deployment=$(oc get deploy "${OPERATOR_NAME}" -n "${OPERATOR_NAMESPACE}" \
-        -o jsonpath='{.metadata.name}' 2>/dev/null || true)
-    if [[ -z "${deployment}" ]]; then
-        deployment=$(oc get deploy -n "${OPERATOR_NAMESPACE}" -l "name=${OPERATOR_NAME}" \
-            -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
-    fi
+    deployment=$(find_operator_deployment)
 
     if [[ -z "${deployment}" ]]; then
         log_error "Could not find the ${OPERATOR_NAME} deployment in ${OPERATOR_NAMESPACE}"
@@ -332,6 +338,7 @@ remove_incompatible_deployment_fs_group() {
 # This value takes precedence over params.env in both ODH and RHOAI.
 ensure_dashboard_image_env() {
     local csv="$1"
+    local required="${2:-false}"
     local env_index=0
     local env_name
     local current_image
@@ -345,7 +352,7 @@ ensure_dashboard_image_env() {
         -o jsonpath='{range .spec.install.spec.deployments[0].spec.template.spec.containers[0].env[*]}{.name}{"\n"}{end}')
 
     if [[ "${env_name:-}" != "RELATED_IMAGE_ODH_DASHBOARD_IMAGE" ]]; then
-        if [[ "${OPERATOR_NAME}" == "${FALLBACK_OPERATOR_NAME}" ]]; then
+        if [[ "${OPERATOR_NAME}" == "${FALLBACK_OPERATOR_NAME}" || "${required}" == "true" ]]; then
             log_error "Could not find RELATED_IMAGE_ODH_DASHBOARD_IMAGE in CSV ${csv}"
             return 1
         fi
@@ -697,9 +704,52 @@ wait_for_dashboard() {
     return 1
 }
 
+# The parent ODH operator owns the dashboard module operator deployment and
+# restores its image override from the parent operator's related image. Update
+# both the CSV and running parent deployment before changing the module operator.
+update_parent_operator_image() {
+    local csv
+    csv=$(find_operator_csv || true)
+    if [[ -z "${csv}" ]]; then
+        log_error "Could not find ${OPERATOR_NAME} CSV in ${OPERATOR_NAMESPACE}"
+        return 1
+    fi
+
+    if ! ensure_dashboard_image_env "${csv}" true; then
+        return 1
+    fi
+
+    local deployment
+    deployment=$(find_operator_deployment)
+    if [[ -z "${deployment}" ]]; then
+        log_error "Could not find the ${OPERATOR_NAME} deployment in ${OPERATOR_NAMESPACE}"
+        return 1
+    fi
+
+    log_step "Updating parent operator ${deployment} image override..."
+    oc set env "deploy/${deployment}" -n "${OPERATOR_NAMESPACE}" \
+        "RELATED_IMAGE_ODH_DASHBOARD_IMAGE=${DASHBOARD_IMAGE}"
+
+    log_info "Waiting for the parent operator to be ready..."
+    if ! oc rollout status "deploy/${deployment}" -n "${OPERATOR_NAMESPACE}" --timeout=180s; then
+        log_error "Parent operator ${deployment} did not become ready."
+        return 1
+    fi
+
+    local current_image
+    current_image=$(oc get deploy "${deployment}" -n "${OPERATOR_NAMESPACE}" \
+        -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="RELATED_IMAGE_ODH_DASHBOARD_IMAGE")].value}')
+    if [[ "${current_image}" != "${DASHBOARD_IMAGE}" ]]; then
+        log_error "The parent operator image override is ${current_image:-not set}, expected ${DASHBOARD_IMAGE}."
+        return 1
+    fi
+}
+
 # Newer installations run a separate dashboard module operator. Its image
-# override controls the dashboard deployment, so no CSV/PVC patch is needed.
+# override controls the dashboard deployment, but the parent operator owns it.
 update_dashboard_module_operator() {
+    update_parent_operator_image
+
     log_step "Updating ${DASHBOARD_OPERATOR_DEPLOYMENT_NAME} image override..."
     oc set env "deploy/${DASHBOARD_OPERATOR_DEPLOYMENT_NAME}" -n "${DASHBOARD_NAMESPACE}" \
         "RELATED_IMAGE_ODH_DASHBOARD_IMAGE=${DASHBOARD_IMAGE}"
@@ -710,6 +760,15 @@ update_dashboard_module_operator() {
         log_error "Dashboard module operator did not become ready."
         oc get pods -n "${DASHBOARD_NAMESPACE}" \
             -l "app.kubernetes.io/instance=${DASHBOARD_OPERATOR_DEPLOYMENT_NAME}" || true
+        return 1
+    fi
+
+    local current_image
+    current_image=$(oc get deploy "${DASHBOARD_OPERATOR_DEPLOYMENT_NAME}" \
+        -n "${DASHBOARD_NAMESPACE}" \
+        -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="RELATED_IMAGE_ODH_DASHBOARD_IMAGE")].value}')
+    if [[ "${current_image}" != "${DASHBOARD_IMAGE}" ]]; then
+        log_error "The parent operator restored the dashboard image override to ${current_image:-not set}."
         return 1
     fi
 
